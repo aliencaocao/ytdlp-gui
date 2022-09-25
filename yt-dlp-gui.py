@@ -16,7 +16,7 @@ frozen = getattr(sys, 'frozen', False)  # frozen -> running in exe
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 logging.addLevelName(15, 'STATUS')  # between debug 10 and info 20
-logger.setLevel(logging.DEBUG)
+logger.setLevel(15)
 download_queue = []
 ongoing_task: bool = False
 logger.info(f'YT-DLP GUI (yt-dlp {yt_dlp.version.__version__}) (Python {sys.version})')
@@ -63,7 +63,6 @@ def download(urls: Union[list, str], ydl_opts=None):
 
 def extract_info(url: str, ydl_opts: dict) -> dict:
     try:
-        print(ydl_opts)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return ydl.sanitize_info(info)
@@ -362,7 +361,7 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
         details_window.destroy()
         root.lift()
 
-    download_button = Button(details_window, text='Download', command=handle_download)  # have to define first else callbacks below complain
+    download_button = Button(scrollableFrame.scrollwindow, text='Download', command=handle_download)  # have to define first else callbacks below complain
     selected_format = StringVar()
     selected_format.trace('w', on_select_format)
     video_only_formats, audio_only_formats = {'Select video format': None}, {'Select audio format': None}  # {text: value} except for None
