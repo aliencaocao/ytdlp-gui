@@ -139,8 +139,7 @@ class DownloadTask(Frame):
         self.thread = None
         self.ydl_opts['progress_hooks'] = [self.progress_hook]
         self.ydl_opts['postprocessor_hooks'] = [self.postprocessor_hook]
-        self.status = StringVar()
-        self.status.set('Queued')
+        self.status = StringVar(value='Queued')
         self.progress = IntVar(value=0)
 
         info = extract_info(url, ydl_opts)
@@ -161,8 +160,7 @@ class DownloadTask(Frame):
         Label(details_frame, text=f'Duration: {self.duration}').pack(side=LEFT)
         Label(details_frame, text=f'Size: {round(self.size / (1024 * 1024), 2)}MB' if self.size else 'unknown size').pack(side=LEFT)
         format_str = ''
-        if self.formats[
-            'video']: format_str += f'Video: {self.formats["video"]["resolution"]}@{self.formats["video"]["fps"]}fps {self.formats["video"]["codec"]} {"HDR" if self.formats["video"]["hdr"] else ""}'
+        if self.formats['video']: format_str += f'Video: {self.formats["video"]["resolution"]}@{self.formats["video"]["fps"]}fps {self.formats["video"]["codec"]} {"HDR" if self.formats["video"]["hdr"] else ""}'
         if self.formats['audio']: format_str += f'Audio: {self.formats["audio"]["sample_rate"]} {self.formats["audio"]["bitrate"]} {self.formats["audio"]["codec"]}'
         Label(details_frame, text=format_str).pack(side=LEFT)
         Label(self, text=f'Save to: {path}').pack(side=TOP)
@@ -252,8 +250,7 @@ def parse_info(info: dict, best_format_only: bool = True) -> dict:
                     formats = parse_format(f)
                     break
     else:
-        formats = [parse_format(f) for f in info['formats'] if
-                   f.get('format_note', '') != 'storyboard' and (f.get('vcodec', 'none') != 'none' or f.get('acodec', 'none') != 'none') and f.get('url', '')]
+        formats = [parse_format(f) for f in info['formats'] if f.get('format_note', '') != 'storyboard' and (f.get('vcodec', 'none') != 'none' or f.get('acodec', 'none') != 'none') and f.get('url', '')]
     # noinspection PyUnboundLocalVariable
     return {'title': title, 'duration': duration, 'size': size, 'subtitles': subtitles, 'formats': formats}
 
@@ -270,9 +267,12 @@ def parse_format(format: dict) -> dict:
         mapping = {'mp4v': 'H263', 'av01': 'AV1', 'avc1': 'H264/AVC', 'hev1': 'H265/HEVC', 'vp9': 'VP9', 'vp8': 'VP8', 'mp4a': 'AAC', 'opus': 'Opus'}
         return mapping.get(codec.split('.')[0].lower(), codec.split('.')[0].lower())
 
-    if contains_video: parsed['video'] = {'resolution': format['resolution'], 'fps': format['fps'], 'codec': parse_codec(format['vcodec']), 'hdr': format['dynamic_range'] != 'SDR'}
+    if contains_video: parsed['video'] = {'resolution': format['resolution'], 'fps': format['fps'],
+                                          'codec': parse_codec(format['vcodec']),
+                                          'hdr': format['dynamic_range'] != 'SDR'}
     if contains_audio: parsed['audio'] = {'sample_rate': f'{round(format["asr"] / 1000, 2)}khz' if 'asr' in format else 'unknown sample rate',
-                                          'bitrate': f'{round(format["abr"])}kbps' if float(format['abr']) else 'unknown bitrate', 'codec': parse_codec(format['acodec'])}
+                                          'bitrate': f'{round(format["abr"])}kbps' if float(format['abr']) else 'unknown bitrate',
+                                          'codec': parse_codec(format['acodec'])}
     return parsed
 
 
@@ -372,13 +372,11 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
             Radiobutton(radiobutton_frame, variable=selected_format, value=f['format_id'],
                         text=f'Video: {f["video"]["resolution"]}@{f["video"]["fps"]}fps {f["video"]["codec"]} {"HDR" if f["video"]["hdr"] else ""}\n'
                              f'Audio: {f["audio"]["sample_rate"]} {f["audio"]["bitrate"]} {f["audio"]["codec"]}\n'
-                             f'File extension: {f["ext"]} Size: ' + (f'{round(f["size"] / (1024 * 1024), 2)}MB' if f["size"] else 'unknown size')).pack(side=TOP, fill=X,
-                                                                                                                                                        expand=True, pady=(0, 10))
+                             f'File extension: {f["ext"]} Size: ' + (f'{round(f["size"] / (1024 * 1024), 2)}MB' if f["size"] else 'unknown size')).pack(side=TOP, fill=X, expand=True, pady=(0, 10))
         else:  # video only or audio only
             if f['video']: video_only_formats[f'{f["video"]["resolution"]}@{f["video"]["fps"]}fps {f["video"]["codec"]} {"HDR" if f["video"]["hdr"] else ""}'] = f['format_id']
             if f['audio']: audio_only_formats[f'{f["audio"]["sample_rate"]} {f["audio"]["bitrate"]} {f["audio"]["codec"]}'] = f['format_id']
-    if not len(radiobutton_frame.winfo_children()): Label(radiobutton_frame, text='No stream containing both video and audio available', anchor=CENTER).pack(side=TOP, fill=X,
-                                                                                                                                                             expand=True)
+    if not len(radiobutton_frame.winfo_children()): Label(radiobutton_frame, text='No stream containing both video and audio available', anchor=CENTER).pack(side=TOP, fill=X, expand=True)
 
     custom_formats_frame = LabelFrame(formats_frame, text='Customize', borderwidth=3)
     custom_formats_frame.pack(side=TOP, fill=X, expand=True)
