@@ -348,6 +348,13 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
             if video_only_formats[video_selected_format.get()]: selected.append(video_only_formats[video_selected_format.get()])
             if audio_only_formats[audio_selected_format.get()]: selected.append(audio_only_formats[audio_selected_format.get()])
             selected_format.set('+'.join(selected))  # allow 1 only
+        try:
+            if video_only_formats[video_selected_format.get()] is None and audio_only_formats[audio_selected_format.get()] is not None:
+                audiio_convert_selector.configure(state=NORMAL)
+            else:
+                audiio_convert_selector.configure(state=DISABLED)
+        except NameError:  # if audio convert selector is not defined yet
+            pass
 
     def on_select_format(*args):
         download_button.configure(state=NORMAL if selected_format.get() else DISABLED)
@@ -355,6 +362,8 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
     def handle_download():
         nonlocal ydl_opts
         ydl_opts['format'] = selected_format.get()
+        if video_only_formats[video_selected_format.get()] is None and audio_only_formats[audio_selected_format.get()] is not None and valid_audio_convert_formats[audio_convert_format.get()] is not None:
+            ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': valid_audio_convert_formats[audio_convert_format.get()], 'preferredquality': 5}]  # 0 highest, 10 lowest. TODO: add selector for quality
         ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
         download_queue.append(DownloadTask(url, path, ydl_opts, queue_frame))
         ydl_opts = ydl_base_opts.copy()  # reset for next task
@@ -386,6 +395,13 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
     audio_selected_format.trace('w', on_select_single_format)
     OptionMenu(custom_formats_frame, video_selected_format, 'Select video format', *video_only_formats.keys()).pack(side=TOP, fill=X, expand=True, pady=(0, 10))
     OptionMenu(custom_formats_frame, audio_selected_format, 'Select audio format', *audio_only_formats.keys()).pack(side=TOP, fill=X, expand=True, pady=(0, 10))
+    audio_convert_format = StringVar(value='Do not convert')
+    valid_audio_convert_formats = {'Do not convert': None, 'AAC (.m4a)': 'aac', 'ALAC (.m4a)': 'alac', 'FLAC (.flac)': 'flac', 'm4a (.m4a)': 'm4a', 'mp3 (.mp3)': 'mp3', 'Opus (.opus)': 'opus', 'Vorbis (.ogg)': 'vorbis', 'WAV (.wav)': 'wav'}
+    audio_convert_frame = LabelFrame(formats_frame, text='Convert audio format to', borderwidth=3)
+    audio_convert_frame.pack(side=TOP, fill=X, expand=True)
+    audiio_convert_selector = OptionMenu(audio_convert_frame, audio_convert_format, 'Do not convert', *valid_audio_convert_formats.keys())
+    audiio_convert_selector.pack(side=TOP, fill=X, expand=True, pady=(5, 5))
+    audiio_convert_selector.configure(state=DISABLED)
     download_button.pack(side=TOP, fill=X, expand=True, padx=10, pady=(0, 10))  # defined at top
     status('Ready')
 
@@ -427,7 +443,7 @@ download_video_button = Button(buttons_frame, text='Download Video', command=lam
 download_video_button.pack(expand=True, fill=X, side=LEFT, padx=(10, 0))
 download_audio_button = Button(buttons_frame, text='Download Audio', command=lambda: handle_download_audio_best(url_input.get(), path_input.get()))
 download_audio_button.pack(expand=True, fill=X, side=LEFT, padx=(2, 0))
-download_info_button = Button(buttons_frame, text='Extract Info', command=lambda: handle_download_info(url_input.get(), path_input.get()))
+download_info_button = Button(buttons_frame, text='Customize Downloads', command=lambda: handle_download_info(url_input.get(), path_input.get()))
 download_info_button.pack(expand=True, fill=X, side=LEFT, padx=(2, 10))
 
 scroll_container_frame = Frame(root)
