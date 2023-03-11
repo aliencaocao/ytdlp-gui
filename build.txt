@@ -1,2 +1,2 @@
 create-version-file version.yml --outfile version.txt
-pyinstaller --log-level DEBUG -F -i icon.ico --version-file=version.txt --add-data "icon.png;." --add-data "ffmpeg.exe;." --add-data "ffprobe.exe;." --distpath ./ --clean --upx-dir upx/ --noconfirm "yt-dlp-gui.py"
+pyinstaller --log-level DEBUG -F -i icon.ico --version-file=version.txt --add-data "icon.png;." --add-data "ffmpeg.exe;." --add-data "ffprobe.exe;." --distpath ./ --clean --noconfirm "yt-dlp-gui.py"

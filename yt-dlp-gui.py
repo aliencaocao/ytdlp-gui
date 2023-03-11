@@ -1,16 +1,15 @@
-import os, sys
-import json
 import ctypes
 import logging
-from typing import Union, Any
+import os
+import sys
 import threading
-
 from tkinter import *
+from tkinter import filedialog, messagebox
 from tkinter.ttk import *
-from tkinter import messagebox, filedialog
+from typing import Any, Union
 
-import yt_dlp
 import requests
+import yt_dlp
 
 frozen = getattr(sys, 'frozen', False)  # frozen -> running in exe
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
@@ -145,7 +144,7 @@ class DownloadTask(Frame):
         info = extract_info(url, ydl_opts)
         if not info: return
         parsed_info = parse_info(info)
-        self.title = parsed_info['title']
+        self.title = parsed_info['title'].replace(os.path.sep, ' ')
         self.duration = parsed_info['duration']
         self.size = parsed_info['size']
         self.formats = parsed_info['formats']
@@ -172,7 +171,7 @@ class DownloadTask(Frame):
     def start_task(self):
         global ongoing_task
         status('Downloading')
-        self.thread = threading.Thread(target=download, args=(self.url, self.ydl_opts))
+        self.thread = threading.Thread(target=download, args=(self.url, self.ydl_opts), daemon=True)
         self.thread.start()
         ongoing_task = True
 
