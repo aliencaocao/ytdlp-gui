@@ -15,9 +15,6 @@ jobs:
     - uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-    - run: pip install pyinstaller-versionfile
-    - name: Create version.txt for PyInstaller
-      run: create-version-file version.yml --outfile version.txt
     - name: PyInstaller Linux
       uses: aliencaocao/pyinstaller_action@main
       with:

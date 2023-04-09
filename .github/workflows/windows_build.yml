@@ -18,7 +18,7 @@ jobs:
     - run: pip install pyinstaller-versionfile
     - name: Download FFMPEG binaries
       run: |
-        wget https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip
+        C:\msys64\usr\bin\wget.exe https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip
         7z x ffmpeg-master-latest-win64-gpl.zip
         cp ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe .
         cp ffmpeg-master-latest-win64-gpl/bin/ffprobe.exe .
