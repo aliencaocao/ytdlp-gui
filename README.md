@@ -3,9 +3,9 @@
 This is (yet another) yt-dlp GUI built with pure Python and Tkinter. It is still in early development stage so only basic functions are developed and functional.
 
 ## Installation
-For Windows, download the executable files from the [releases page](https://github.com/aliencaocao/ytdlp-gui/releases/latest).
+For Windows and Linux, download the executable files from the [releases page](https://github.com/aliencaocao/ytdlp-gui/releases/latest).
 
-For macOS and Linux, you can clone this repository and run the `main.py` file with Python 3, or follow the build instructions below to build binary executables.
+For macOS, you can clone this repository and run the `main.py` file with Python 3, or follow the build instructions below to build binary executables.
 
 
 ## Features
@@ -13,7 +13,7 @@ For macOS and Linux, you can clone this repository and run the `main.py` file wi
 * Choose and combine any video and audio formats into a single file, or download only video or only audio.
 * Built-in transcoding of audio into other formats (AAC, ALAC, FLAC, M4A, MP3, Opus, Vorbis, WAV) for ease of use on other platforms.
 * Packaged into a single executable and embeds ffmpeg and ffprobe binaries so user do not have to install anything.
-* Cross-platform (Windows, Linux, macOS) and works on both X86 and ARM machines. However, only Windows binary builds are available now, for other formats, you can build yourself from source following the insturctions below.
+* Cross-platform (Windows, Linux, macOS) and works on both X86 and ARM machines. However, only Windows and Linux binary builds are available now, for other formats, you can build yourself from source following the insturctions below.
 
 ![](home.png "Home page of the program")
 
