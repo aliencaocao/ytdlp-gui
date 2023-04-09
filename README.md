@@ -5,7 +5,7 @@ This is (yet another) yt-dlp GUI built with pure Python and Tkinter. It is still
 ## Installation
 For Windows and Linux, download the executable files from the [releases page](https://github.com/aliencaocao/ytdlp-gui/releases/latest).
 
-For macOS, you can clone this repository and run the `main.py` file with Python 3, or follow the build instructions below to build binary executables.
+For macOS, you can clone this repository and run the `yt-dlp-gui.py` file with Python 3, or follow the build instructions below to build binary executables.
 
 
 ## Features
