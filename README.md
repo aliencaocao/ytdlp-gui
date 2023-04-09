@@ -1,6 +1,6 @@
 # YT-DLP GUI
 
-This is (yet another) yt-dlp GUI built with pure Python and Tkinter. It is still in early development stages so only basic functions are developed and functional.
+This is (yet another) yt-dlp GUI built with pure Python and Tkinter. It is still in early development stage so only basic functions are developed and functional.
 
 ## Installation
 For Windows, download the executable files from the [releases page](https://github.com/aliencaocao/ytdlp-gui/releases/latest).
