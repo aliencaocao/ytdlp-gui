@@ -49,7 +49,7 @@ ydl_base_opts: dict[str, Any] = {'outtmpl': '%(extractor)s-TITLE-%(id)s.%(ext)s'
                                  'age_limit': 100,
                                  'noplaylist': True,
                                  'live_from_start': True,
-                                 'ffmpeg-location': get_res_path('ffmpeg.exe'),
+                                 'ffmpeg-location': get_res_path('ffmpeg.exe') if os.name == 'nt' else 'ffmpeg',
                                  'no-video-multistreams': True,
                                  'no-audio-multistreams': True}
 
