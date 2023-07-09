@@ -2,3 +2,4 @@
 *.exe
 build/
 upx/
+version.txt
