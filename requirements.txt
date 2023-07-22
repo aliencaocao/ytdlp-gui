@@ -1,3 +1,4 @@
 requests
 yt_dlp
 pyinstaller
+sanitize_filename

@@ -10,6 +10,7 @@ from typing import Any, Union
 
 import requests
 import yt_dlp
+from sanitize_filename import sanitize
 
 frozen = getattr(sys, 'frozen', False)  # frozen -> running in exe
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,7 +32,7 @@ def get_res_path(relative_path: str) -> str:
         raise FileNotFoundError(f'{os.path.join(base_path, relative_path)} is not found!')
 
 
-ydl_base_opts: dict[str, Any] = {'outtmpl': '%(extractor)s-TITLE-%(id)s.%(ext)s',
+ydl_base_opts: dict[str, Any] = {'outtmpl': 'TITLE-%(id)s.%(ext)s',
                                  'restrictfilenames': True,
                                  'nocheckcertificate': True,
                                  'ignoreerrors': False,
@@ -144,7 +145,7 @@ class DownloadTask(Frame):
         info = extract_info(url, ydl_opts)
         if not info: return
         parsed_info = parse_info(info)
-        self.title = parsed_info['title'].replace(os.path.sep, ' ')
+        self.title = sanitize(parsed_info['title'])
         self.duration = parsed_info['duration']
         self.size = parsed_info['size']
         self.formats = parsed_info['formats']
@@ -263,14 +264,14 @@ def parse_format(format: dict) -> dict:
     parsed['size'] = format.get('filesize', format.get('filesize_approx', 0))
 
     def parse_codec(codec: str) -> str:
-        mapping = {'mp4v': 'H263', 'av01': 'AV1', 'avc1': 'H264/AVC', 'hev1': 'H265/HEVC', 'vp9': 'VP9', 'vp8': 'VP8', 'mp4a': 'AAC', 'opus': 'Opus'}
+        mapping = {'mp4v': 'H263', 'av01': 'AV1', 'avc1': 'H264/AVC', 'hev1': 'H265/HEVC', 'vp9': 'VP9', 'vp09': 'VP9', 'vp8': 'VP8', 'mp4a': 'AAC', 'opus': 'Opus'}
         return mapping.get(codec.split('.')[0].lower(), codec.split('.')[0].lower())
 
     if contains_video: parsed['video'] = {'resolution': format['resolution'], 'fps': format['fps'],
                                           'codec': parse_codec(format['vcodec']),
                                           'hdr': format['dynamic_range'] != 'SDR'}
     if contains_audio: parsed['audio'] = {'sample_rate': f'{round(format["asr"] / 1000, 2)}khz' if 'asr' in format else 'unknown sample rate',
-                                          'bitrate': f'{round(format["abr"])}kbps' if float(format['abr']) else 'unknown bitrate',
+                                          'bitrate': f'{round(format["abr"])}kbps' if format.get('abr', None) and float(format['abr']) else 'unknown bitrate',
                                           'codec': parse_codec(format['acodec'])}
     return parsed
 
@@ -349,20 +350,24 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
             selected_format.set('+'.join(selected))  # allow 1 only
         try:
             if video_only_formats[video_selected_format.get()] is None and audio_only_formats[audio_selected_format.get()] is not None:
-                audiio_convert_selector.configure(state=NORMAL)
+                audio_convert_selector.configure(state=NORMAL)
             else:
-                audiio_convert_selector.configure(state=DISABLED)
+                audio_convert_selector.configure(state=DISABLED)
+                audio_convert_quality_selector.configure(state=DISABLED)
         except NameError:  # if audio convert selector is not defined yet
             pass
 
     def on_select_format(*args):
         download_button.configure(state=NORMAL if selected_format.get() else DISABLED)
 
+    def on_select_audio_convert_format(*args):
+        audio_convert_quality_selector.configure(state=NORMAL if audio_convert_format.get() != 'Do not convert' else DISABLED)
+
     def handle_download():
         nonlocal ydl_opts
         ydl_opts['format'] = selected_format.get()
         if video_only_formats[video_selected_format.get()] is None and audio_only_formats[audio_selected_format.get()] is not None and valid_audio_convert_formats[audio_convert_format.get()] is not None:
-            ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': valid_audio_convert_formats[audio_convert_format.get()], 'preferredquality': 5}]  # 0 highest, 10 lowest. TODO: add selector for quality
+            ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': valid_audio_convert_formats[audio_convert_format.get()], 'preferredquality': audio_convert_quality_values[audio_convert_quality.get()]}]  # 0 highest, 10 lowest.
         ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
         download_queue.append(DownloadTask(url, path, ydl_opts, queue_frame))
         ydl_opts = ydl_base_opts.copy()  # reset for next task
@@ -398,9 +403,14 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
     valid_audio_convert_formats = {'Do not convert': None, 'AAC (.m4a)': 'aac', 'ALAC (.m4a)': 'alac', 'FLAC (.flac)': 'flac', 'm4a (.m4a)': 'm4a', 'mp3 (.mp3)': 'mp3', 'Opus (.opus)': 'opus', 'Vorbis (.ogg)': 'vorbis', 'WAV (.wav)': 'wav'}
     audio_convert_frame = LabelFrame(formats_frame, text='Convert audio format to', borderwidth=3)
     audio_convert_frame.pack(side=TOP, fill=X, expand=True)
-    audiio_convert_selector = OptionMenu(audio_convert_frame, audio_convert_format, 'Do not convert', *valid_audio_convert_formats.keys())
-    audiio_convert_selector.pack(side=TOP, fill=X, expand=True, pady=(5, 5))
-    audiio_convert_selector.configure(state=DISABLED)
+    audio_convert_selector = OptionMenu(audio_convert_frame, audio_convert_format, 'Do not convert', *valid_audio_convert_formats.keys(), command=on_select_audio_convert_format)
+    audio_convert_selector.pack(side=TOP, fill=X, expand=True, pady=(5, 5))
+    audio_convert_selector.configure(state=DISABLED)
+    audio_convert_quality = StringVar(value='5')
+    audio_convert_quality_values = {k: v for v, k in enumerate(['0 (Highest)', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10 (Lowest)'])}
+    audio_convert_quality_selector = OptionMenu(audio_convert_frame, audio_convert_quality, '5', *audio_convert_quality_values)
+    audio_convert_quality_selector.pack(side=TOP, fill=X, expand=True, pady=(5, 5))
+    audio_convert_quality_selector.configure(state=DISABLED)
     download_button.pack(side=TOP, fill=X, expand=True, padx=10, pady=(0, 10))  # defined at top
     status('Ready')
 
