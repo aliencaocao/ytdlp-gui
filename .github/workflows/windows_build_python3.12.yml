@@ -1,0 +1,34 @@
+name: Windows Build Python 3.12
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    - run: pip install pyinstaller-versionfile
+    - name: Download FFMPEG binaries
+      run: |
+        C:\msys64\usr\bin\wget.exe https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip
+        7z x ffmpeg-master-latest-win64-gpl.zip
+        cp ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe .
+        cp ffmpeg-master-latest-win64-gpl/bin/ffprobe.exe .
+        ffmpeg -version
+    - name: Create version.txt for PyInstaller
+      run: create-version-file version.yml --outfile version.txt
+    - name: PyInstaller Windows
+      uses: aliencaocao/pyinstaller_action@main
+      with:
+        python_ver: '3.12'
+        spec: 'yt-dlp-gui.spec'
+        requirements: 'requirements.txt'
+        upload_exe_with_name: 'yt-dlp-gui.exe'
