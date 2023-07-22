@@ -22,6 +22,7 @@ jobs:
         7z x ffmpeg-master-latest-win64-gpl.zip
         cp ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe .
         cp ffmpeg-master-latest-win64-gpl/bin/ffprobe.exe .
+        ffmpeg -version
     - name: Create version.txt for PyInstaller
       run: create-version-file version.yml --outfile version.txt
     - name: PyInstaller Windows
