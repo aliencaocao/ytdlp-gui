@@ -36,4 +36,5 @@ Download details page of the program (accessible by clicking "Customize Download
 You need Python 3.6+.
 1. Clone this repository.
 2. Install the dependencies with `pip install -r requirements.txt`. On Windows machines, a working ffmpeg.exe and ffprobe.exe is also needed in the same directory as the `main.py` file. You can download them from [here](https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/latest). Choose `ffmpeg-master-latest-win64-gpl.zip`.
-3. Modify `version.yml` if needed and run commands in build.txt. On non-Windows machines, remove `--add-data "ffmpeg.exe;." --add-data "ffprobe.exe;."` from it.
+3. Modify `version.yml` if needed
+4. Run commands in build.txt in system shell (`cd` to project dir). On non-Windows machines, remove `--add-data "ffmpeg.exe:." --add-data "ffprobe.exe:."` from it.
