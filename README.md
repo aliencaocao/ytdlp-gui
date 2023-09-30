@@ -30,7 +30,7 @@ Download details page of the program (accessible by clicking "Customize Download
 
 ## Planned features
 * Remembering last save location (currently it always defaults to the current working directory).
-
+* Downloading playlists
 
 ## Building
 You need Python 3.6+.

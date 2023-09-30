@@ -28,7 +28,7 @@ jobs:
     - name: PyInstaller Windows
       uses: aliencaocao/pyinstaller_action@main
       with:
-        python_ver: '3.12.0-beta.4'
+        python_ver: '3.12.0-rc.3'  # https://github.com/actions/python-versions/blob/main/versions-manifest.json
         spec: 'yt-dlp-gui.spec'
         requirements: 'requirements.txt'
         upload_exe_with_name: 'yt-dlp-gui.exe'
