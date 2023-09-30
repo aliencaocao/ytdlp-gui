@@ -4,9 +4,9 @@ import os
 import sys
 import threading
 from tkinter import *
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 from tkinter.ttk import *
-from typing import Any, Union
+from typing import Any, Union, Callable
 
 import requests
 import yt_dlp
@@ -38,34 +38,86 @@ ydl_base_opts: dict[str, Any] = {'outtmpl': 'TITLE-%(id)s.%(ext)s',
                                  'ignoreerrors': False,
                                  'logtostderr': False,
                                  'geo-bypass': True,
-                                 'no_color': True,
                                  'quiet': True,
                                  'no_warnings': True,
                                  'default_search': 'auto',
                                  'source_address': '0.0.0.0',
                                  'windowsfilenames': True,
                                  'overwrites': True,
-                                 'logger': logger,
                                  'cachedir': False,
                                  'age_limit': 100,
                                  'noplaylist': True,
                                  'live_from_start': True,
-                                 'ffmpeg-location': get_res_path('ffmpeg.exe') if os.name == 'nt' else 'ffmpeg',
                                  'no-video-multistreams': True,
-                                 'no-audio-multistreams': True}
+                                 'no-audio-multistreams': True,
+                                 'check_formats': True,
+                                 'fixup': 'detect_or_warn',
+                                 'extractor_args': {'youtube': {'skip': ['dash', 'hls']}},
+                                 }
 
 
-def download(urls: Union[list, str], ydl_opts=None):
-    if ydl_opts is None: ydl_opts = ydl_base_opts
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download(urls if isinstance(urls, list) else [urls])
+def handle_private_video(e: object, url: str, ydl_opts: dict, func: Callable[[str, dict, bool], Union[dict, bool]]) -> Union[dict, bool]:
+    """Returns info if func is successful after login and False if not"""
+    result = False
+
+    def handle_choose():
+        nonlocal result
+        if v.get() == 0: return
+        browser = [browsers[v.get() - 1]]  # yt_dlp expects a list
+        ydl_opts['cookiesfrombrowser'] = browser
+        popup.title('Logging in...')
+        choose_button_var.set('Logging in...')
+        choose_button.configure(state=DISABLED)
+        popup.update()
+        info = func(url, ydl_opts, True)  # can be download() or extract_info()
+        if info:
+            ydl_base_opts['cookiesfrombrowser'] = browser
+            result = info
+            messagebox.showinfo('Login', 'Login successful! Specified browser will be used until you close this app. Browser will be asked again if you attempt to download another private video that the existing accounts in this browser cannot access.')
+        else:
+            messagebox.showerror('Login', 'Login failed. The browser you chose does not have an account with access to this video.')
+        popup.destroy()
+
+    if str(e).endswith('Private video. Sign in if you\'ve been granted access to this video'):
+        browsers = ['brave', 'chrome', 'chromium', 'edge', 'firefox', 'opera', 'safari', 'vivaldi']
+        popup = Toplevel(takefocus=True)
+        popup.title('Choose browser to fetch account cookies from')
+        Label(popup, text='This video is private. Please choose the browser you use that is logged into your video platform.\nIf you are on Windows and use Chrome or Edge, please close your browser before choosing.').pack()
+        v = IntVar(value=0)
+        choose_button_var = StringVar(value='Choose')
+        for i, option in enumerate(browsers):
+            Radiobutton(popup, text=option, variable=v, value=i + 1).pack(anchor="w")
+        choose_button = Button(popup, command=handle_choose, textvariable=choose_button_var)
+        choose_button.pack()
+        root.wait_window(popup)
+    return result
 
 
-def extract_info(url: str, ydl_opts: dict) -> dict:
+def download(urls: Union[list, str], ydl_opts=None, ignore_error: bool = False) -> bool:
+    """Return whether download is successful"""
+    if ydl_opts is None: ydl_opts = ydl_base_opts.copy()
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download(urls if isinstance(urls, list) else [urls])
+    except yt_dlp.utils.DownloadError as e:
+        if ignore_error: return False
+        return handle_private_video(e, urls, ydl_opts, download)
+    else:
+        return True
+
+
+def extract_info(url: str, ydl_opts: dict, ignore_error: bool = False) -> dict:
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return ydl.sanitize_info(info)
+    except yt_dlp.utils.DownloadError as e:
+        if ignore_error: return {}
+        result = handle_private_video(e, url, ydl_opts, extract_info)
+        if not result:
+            return {}
+        else:  # success
+            return result
     except Exception as e:
         messagebox.showerror('Error', f'Error while extracting info: {e}')
         return {}
@@ -142,9 +194,11 @@ class DownloadTask(Frame):
         self.status = StringVar(value='Queued')
         self.progress = IntVar(value=0)
 
+        self.extract_info_succeed = False
         info = extract_info(url, ydl_opts)
         if not info: return
         parsed_info = parse_info(info)
+        self.extract_info_succeed = True
         self.title = sanitize(parsed_info['title'])
         self.duration = parsed_info['duration']
         self.size = parsed_info['size']
@@ -324,7 +378,7 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
         status('Ready')
         return
     parsed_info = parse_info(info, best_format_only=False)
-    details_window = Toplevel()  # no need mainloop here as below we use the general global mainloop function
+    details_window = Toplevel(takefocus=True)  # no need mainloop here as below we use the general global mainloop function
     details_window.title('Extracted Info')
     Label(details_window, text=f'{parsed_info["title"]} ({parsed_info["duration"]})', anchor=CENTER).pack(side=TOP, fill=X, expand=True, padx=10)
 
@@ -407,8 +461,8 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
     audio_convert_selector.pack(side=TOP, fill=X, expand=True, pady=(5, 5))
     audio_convert_selector.configure(state=DISABLED)
     audio_convert_quality = StringVar(value='5')
-    audio_convert_quality_values = {k: v for v, k in enumerate(['0 (Highest)', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10 (Lowest)'])}
-    audio_convert_quality_selector = OptionMenu(audio_convert_frame, audio_convert_quality, '5', *audio_convert_quality_values)
+    audio_convert_quality_values = {k: v for v, k in enumerate(['0 (Highest Quality)', '1', '2', '3', '4', '5 (Medium Quality)', '6', '7', '8', '9', '10 (Lowest Quality)'])}
+    audio_convert_quality_selector = OptionMenu(audio_convert_frame, audio_convert_quality, '5 (Medium Quality)', *audio_convert_quality_values)
     audio_convert_quality_selector.pack(side=TOP, fill=X, expand=True, pady=(5, 5))
     audio_convert_quality_selector.configure(state=DISABLED)
     download_button.pack(side=TOP, fill=X, expand=True, padx=10, pady=(0, 10))  # defined at top
@@ -425,7 +479,11 @@ def select_save_path():
 def do_tasks():
     if download_queue and not ongoing_task:
         task = download_queue[0]
-        task.start_task()
+        if task.extract_info_succeed:
+            task.start_task()
+        else:
+            download_queue.remove(task)
+            status('Ready')
     queue_frame.after(1000, do_tasks)
     root.update()
 
@@ -463,4 +521,4 @@ queue_frame.pack(fill=BOTH, expand=True, anchor=CENTER, padx=(10, 10), pady=(10,
 do_tasks()
 
 status('Ready')
-mainloop()
+root.mainloop()
