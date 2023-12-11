@@ -7,6 +7,9 @@ from tkinter import *
 from tkinter import filedialog, messagebox, simpledialog
 from tkinter.ttk import *
 from typing import Any, Union, Callable
+import re
+if sys.platform == 'win32':
+    import winreg
 
 import requests
 import yt_dlp
@@ -54,6 +57,7 @@ ydl_base_opts: dict[str, Any] = {'outtmpl': 'TITLE-%(id)s.%(ext)s',
                                  'fixup': 'detect_or_warn',
                                  'extractor_args': {'youtube': {'skip': ['dash', 'hls']}},
                                  }
+percent_str_regex = re.compile(r'\d{1,3}\.\d{1,2}%')
 
 
 def handle_private_video(e: object, url: str, ydl_opts: dict, func: Callable[[str, dict, bool], Union[dict, bool]]) -> Union[dict, bool]:
@@ -233,8 +237,11 @@ class DownloadTask(Frame):
     def progress_hook(self, d: dict):
         global ongoing_task
         if d['status'] == 'downloading':
-            self.status.set(f'Downloading: {d["_percent_str"]} at {d["_speed_str"]} ETA {d["_eta_str"]}')
-            self.progress.set(int(float(d['_percent_str'].rstrip('%'))))
+            percent_str = percent_str_regex.search(d['_percent_str'])
+            if percent_str:
+                percent_str = percent_str.group()
+                self.status.set(f'Downloading: {percent_str} at {d["_speed_str"]} ETA {d["_eta_str"]}')
+                self.progress.set(int(float(percent_str.rstrip('%'))))
         elif d['status'] == 'finished':  # may have postprocessing later but can start downloading next task already since postprocessing no need internet and is usually fast
             if self in download_queue: download_queue.remove(self)
             self.status.set('Finished')
@@ -266,8 +273,6 @@ status_bar.pack(expand=True, fill=X, side=BOTTOM, pady=(0, 0))
 
 status_bar.rowconfigure(0, weight=1)
 status_bar.columnconfigure(1, weight=1)
-testing_text = Label(status_bar, text='', anchor=W)
-testing_text.grid(row=0, column=0, sticky=W)
 status_text = Label(status_bar, textvariable=status_var, anchor=E)
 status_text.grid(row=0, column=2, sticky=E)
 
@@ -470,10 +475,16 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
 
 
 def select_save_path():
-    path = filedialog.askdirectory(initialdir=os.getcwd(), title='Choose a folder to save the downloaded file')
+    path = filedialog.askdirectory(initialdir=initial_dir, title='Choose a folder to save the downloaded file')
     if path:
         path_input.delete(0, END)
         path_input.insert(0, path)
+    if sys.platform == 'win32':
+        winreg.SetValue(winreg.HKEY_CURRENT_USER, 'Software\\YT-DLP GUI', winreg.REG_SZ, path)
+    else:
+        os.makedirs('~/.config/yt-dlp', exist_ok=True)
+        with open('~/.config/yt-dlp/last_path.txt', 'w+') as f:
+            f.write(path)
 
 
 def do_tasks():
@@ -488,6 +499,17 @@ def do_tasks():
     root.update()
 
 
+initial_dir = os.getcwd()
+if sys.platform == 'win32':
+    try:
+        initial_dir = winreg.QueryValue(winreg.HKEY_CURRENT_USER, 'Software\\YT-DLP GUI')
+    except FileNotFoundError:  # if key not found
+        pass
+elif os.path.isfile('~/.config/yt-dlp/last_path.txt'):
+        with open('~/.config/yt-dlp/last_path.txt', 'r') as f:
+            initial_dir = f.read()
+
+
 url_input_frame = Frame(root)
 url_input_frame.pack(expand=True, fill=BOTH, side=TOP, pady=(5, 10))
 Label(url_input_frame, text='URL: ').pack(side=LEFT, padx=(10, 0))
@@ -500,7 +522,7 @@ path_input_frame.pack(expand=True, fill=BOTH, side=TOP, pady=(5, 10))
 Label(path_input_frame, text='Path: ').pack(side=LEFT, padx=(10, 0))
 path_input = Entry(path_input_frame, width=50)
 path_input.pack(expand=True, fill=X, side=LEFT, padx=(2, 0))
-path_input.insert(0, os.getcwd().replace('\\', '/'))
+path_input.insert(0, initial_dir.replace('\\', '/'))
 path_select_button = Button(path_input_frame, text='Choose', command=select_save_path)
 path_select_button.pack(side=LEFT, padx=(2, 10))
 
