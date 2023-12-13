@@ -29,7 +29,6 @@ Download details page of the program (accessible by clicking "Customize Download
 
 
 ## Planned features
-* Remembering last save location (currently it always defaults to the current working directory).
 * Downloading playlists
 
 ## Building
@@ -37,4 +36,5 @@ You need Python 3.6+.
 1. Clone this repository.
 2. Install the dependencies with `pip install -r requirements.txt`. On Windows machines, a working ffmpeg.exe and ffprobe.exe is also needed in the same directory as the `main.py` file. You can download them from [here](https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/latest). Choose `ffmpeg-master-latest-win64-gpl.zip`.
 3. Modify `version.yml` if needed
-4. Run commands in build.txt in system shell (`cd` to project dir). On non-Windows machines, remove `--add-data "ffmpeg.exe:." --add-data "ffprobe.exe:."` from it.
+4. (Optional) Install UPX and make sure it is on PATH. UPX helps to reduce binary size.
+5. Run commands in build.txt in system shell (`cd` to project dir). On non-Windows machines, remove `--add-data "ffmpeg.exe:." --add-data "ffprobe.exe:."` from it.
