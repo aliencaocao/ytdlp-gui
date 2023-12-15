@@ -53,7 +53,7 @@ ydl_base_opts: dict[str, Any] = {'outtmpl': 'TITLE-%(id)s.%(ext)s',
                                  'live_from_start': True,
                                  'no-video-multistreams': True,
                                  'no-audio-multistreams': True,
-                                 'check_formats': True,
+                                 # 'check_formats': True,
                                  'fixup': 'detect_or_warn',
                                  'extractor_args': {'youtube': {'skip': ['dash', 'hls']}},
                                  }
