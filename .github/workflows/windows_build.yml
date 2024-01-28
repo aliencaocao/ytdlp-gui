@@ -38,4 +38,4 @@ jobs:
         spec: 'yt-dlp-gui.spec'
         requirements: 'requirements.txt'
         upload_exe_with_name: 'yt-dlp-gui.exe'
-        clean_checkout: true
+        clean_checkout: false
