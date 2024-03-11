@@ -55,7 +55,8 @@ ydl_base_opts: dict[str, Any] = {'outtmpl': 'TITLE-%(id)s.%(ext)s',
                                  'no-audio-multistreams': True,
                                  # 'check_formats': True,
                                  'fixup': 'detect_or_warn',
-                                 'extractor_args': {'youtube': {'skip': ['dash', 'hls']}},
+                                 'extractor_args': {'youtube': {'skip': ['dash', 'hls']},},
+                                 'ffmpeg_location': get_res_path('ffmpeg.exe') if sys.platform == 'win32' else 'ffmpeg',
                                  }
 percent_str_regex = re.compile(r'\d{1,3}\.\d{1,2}%')
 
@@ -236,11 +237,11 @@ class DownloadTask(Frame):
 
     def progress_hook(self, d: dict):
         global ongoing_task
-        if d['status'] == 'downloading':
+        if d['status'] == 'downloading' and '_default_template' in d:
             percent_str = percent_str_regex.search(d['_percent_str'])
             if percent_str:
                 percent_str = percent_str.group()
-                self.status.set(f'Downloading: {percent_str} at {d["_speed_str"]} ETA {d["_eta_str"]}')
+                self.status.set(f'Downloading: {d["_default_template"]}')
                 self.progress.set(int(float(percent_str.rstrip('%'))))
         elif d['status'] == 'finished':  # may have postprocessing later but can start downloading next task already since postprocessing no need internet and is usually fast
             if self in download_queue: download_queue.remove(self)
@@ -256,7 +257,7 @@ class DownloadTask(Frame):
     def postprocessor_hook(self, d: dict):
         global ongoing_task
         if d['status'] == 'started' or d['status'] == 'processing':
-            self.status.set('Processing')
+            self.status.set('Post-processing')
         else:
             if self in download_queue: download_queue.remove(self)
             self.status.set('Finished')
