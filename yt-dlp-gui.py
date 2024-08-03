@@ -1,13 +1,14 @@
 import ctypes
 import logging
 import os
+import re
 import sys
 import threading
 from tkinter import *
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox
 from tkinter.ttk import *
-from typing import Any, Union, Callable
-import re
+from typing import Any, Callable, Union
+
 if sys.platform == 'win32':
     import winreg
 
@@ -53,9 +54,9 @@ ydl_base_opts: dict[str, Any] = {'outtmpl': 'TITLE-%(id)s.%(ext)s',
                                  'live_from_start': True,
                                  'no-video-multistreams': True,
                                  'no-audio-multistreams': True,
-                                 # 'check_formats': True,
+                                 'check_formats': 'selected',
                                  'fixup': 'detect_or_warn',
-                                 'extractor_args': {'youtube': {'skip': ['dash', 'hls']},},
+                                 'extractor_args': {'youtube': {'skip': ['dash', 'hls']}, },
                                  'ffmpeg_location': get_res_path('ffmpeg.exe') if sys.platform == 'win32' else 'ffmpeg',
                                  }
 percent_str_regex = re.compile(r'\d{1,3}\.\d{1,2}%')
@@ -507,9 +508,8 @@ if sys.platform == 'win32':
     except FileNotFoundError:  # if key not found
         pass
 elif os.path.isfile('~/.config/yt-dlp/last_path.txt'):
-        with open('~/.config/yt-dlp/last_path.txt', 'r') as f:
-            initial_dir = f.read()
-
+    with open('~/.config/yt-dlp/last_path.txt', 'r') as f:
+        initial_dir = f.read()
 
 url_input_frame = Frame(root)
 url_input_frame.pack(expand=True, fill=BOTH, side=TOP, pady=(5, 10))
