@@ -105,9 +105,12 @@ def download(urls: Union[list, str], ydl_opts=None, ignore_error: bool = False) 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download(urls if isinstance(urls, list) else [urls])
-    except yt_dlp.utils.DownloadError as e:
+    except (yt_dlp.utils.DownloadError, yt_dlp.utils.ExtractorError) as e:
         if ignore_error: return False
         return handle_private_video(e, urls, ydl_opts, download)
+    except Exception as e:
+        messagebox.showerror('Error', f'Error while downloading: {e}')
+        return False
     else:
         return True
 
@@ -117,7 +120,7 @@ def extract_info(url: str, ydl_opts: dict, ignore_error: bool = False) -> dict:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return ydl.sanitize_info(info)
-    except yt_dlp.utils.DownloadError as e:
+    except (yt_dlp.utils.DownloadError, yt_dlp.utils.ExtractorError) as e:
         if ignore_error: return {}
         result = handle_private_video(e, url, ydl_opts, extract_info)
         if not result:
