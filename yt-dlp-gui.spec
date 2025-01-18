@@ -12,6 +12,7 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
+    optimize=2,
 )
 pyz = PYZ(a.pure)
 
@@ -20,7 +21,7 @@ exe = EXE(
     a.scripts,
     a.binaries,
     a.datas,
-    [],
+    [('O', None, 'OPTION'), ('O', None, 'OPTION')],
     name='yt-dlp-gui',
     debug=False,
     bootloader_ignore_signals=False,
