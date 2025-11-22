@@ -11,10 +11,11 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
       with:
         python-version: '3.13'
+        check-latest: true
     - run: pip install pyinstaller-versionfile
     - name: Install UPX
       uses: crazy-max/ghaction-upx@v3
@@ -29,6 +30,12 @@ jobs:
         cp ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe .
         cp ffmpeg-master-latest-win64-gpl/bin/ffprobe.exe .
         ./ffmpeg -version
+    - name: Download Deno
+      run: |
+        C:\msys64\usr\bin\wget.exe https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip
+        7z x deno-x86_64-pc-windows-msvc.zip
+        cp deno.exe .
+        ./deno --version
     - name: Create version.txt for PyInstaller
       run: create-version-file version.yml --outfile version.txt
     - name: PyInstaller Windows

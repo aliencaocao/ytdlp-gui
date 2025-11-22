@@ -5,7 +5,7 @@ a = Analysis(
     ['yt-dlp-gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('icon.png', '.'), ('ffmpeg.exe', '.'), ('ffprobe.exe', '.')],
+    datas=[('icon.png', '.'), ('ffmpeg.exe', '.'), ('ffprobe.exe', '.'), ('deno.exe', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

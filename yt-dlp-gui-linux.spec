@@ -8,7 +8,7 @@ a = Analysis(
     ['yt-dlp-gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('icon.png', '.')],
+    datas=[('icon.png', '.'), ('deno', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

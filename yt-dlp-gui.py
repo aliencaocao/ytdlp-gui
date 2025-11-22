@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import threading
+import urllib.parse
 from tkinter import *
 from tkinter import filedialog, messagebox
 from tkinter.ttk import *
@@ -12,7 +13,6 @@ from typing import Any, Callable, Union
 if sys.platform == 'win32':
     import winreg
 
-import requests
 import yt_dlp
 from sanitize_filename import sanitize
 
@@ -35,6 +35,15 @@ def get_res_path(relative_path: str) -> str:
     else:
         raise FileNotFoundError(f'{os.path.join(base_path, relative_path)} is not found!')
 
+
+# Add deno to PATH
+try:
+    deno_exe = 'deno.exe' if sys.platform == 'win32' else 'deno'
+    deno_path = get_res_path(deno_exe)
+    os.environ["PATH"] += os.pathsep + os.path.dirname(deno_path)
+    logger.info(f'Found {deno_exe} at {deno_path}, added to PATH')
+except FileNotFoundError:
+    logger.warning('Deno not found! yt-dlp might fail on some sites.')
 
 ydl_base_opts: dict[str, Any] = {'outtmpl': 'TITLE-%(id)s.%(ext)s',
                                  'restrictfilenames': True,
@@ -192,49 +201,112 @@ except:
 
 
 class DownloadTask(Frame):
-    def __init__(self, url: str, path: str, ydl_opts: dict, parent: Widget):
+    def __init__(self, url: str, path: str, ydl_opts: dict, parent: Widget, info: dict = None):
         super().__init__(parent, borderwidth=2, relief='groove')
         self.url = url
+        self.path = path
         self.parent = parent
         self.ydl_opts = ydl_opts
         self.thread = None
         self.ydl_opts['progress_hooks'] = [self.progress_hook]
         self.ydl_opts['postprocessor_hooks'] = [self.postprocessor_hook]
-        self.status = StringVar(value='Queued')
+        self.status = StringVar(value='Queued - Waiting to extract info...')
         self.progress = IntVar(value=0)
 
+        self.extracting = False
+        self.extracted = False
         self.extract_info_succeed = False
-        info = extract_info(url, ydl_opts)
-        if not info: return
+
+        # Placeholder UI
+        self.title_label = Label(self, text=f'URL: {self.url}')
+        self.title_label.pack(side=TOP)
+        self.details_frame = Frame(self)
+        self.details_frame.pack(side=TOP)
+        self.status_label = Label(self, textvariable=self.status, anchor=CENTER)
+        self.status_label.pack(side=TOP, fill=X, expand=True, padx=10)
+        self.pack(side=TOP, fill=X, pady=(0, 5), ipadx=5)
+
+        if info:
+            self.title = info.get('title', 'Unknown Title')
+            self.duration = info.get('duration_string', 'Unknown Duration')
+            self.size = info.get('filesize', info.get('filesize_approx', 0))
+            self.formats = info.get('formats', {})
+            self._update_ui_after_extraction()
+
+    def start_extraction(self):
+        self.extracting = True
+        self.status.set('Extracting info...')
+        threading.Thread(target=self._extract_info_thread, daemon=True).start()
+
+    def _extract_info_thread(self):
+        info = extract_info(self.url, self.ydl_opts)
+        if not info:
+            self.extracting = False
+            self.extracted = True
+            self.status.set('Failed to extract info')
+            self.after(0, lambda: messagebox.showerror('Error', 'URL is invalid or extraction failed!'))
+            return
+
         parsed_info = parse_info(info)
-        self.extract_info_succeed = True
         self.title = sanitize(parsed_info['title'])
         self.duration = parsed_info['duration']
-        self.size = parsed_info['size']
-        self.formats = parsed_info['formats']
+        # Sanitize title for filename
+        self.title = sanitize(self.title)
+
         if isinstance(self.ydl_opts['outtmpl'], dict):
             self.ydl_opts['outtmpl']['default'] = self.ydl_opts['outtmpl']['default'].replace('TITLE', self.title)
         else:
             self.ydl_opts['outtmpl'] = self.ydl_opts['outtmpl'].replace('TITLE', self.title)
 
-        Label(self, text=self.title).pack(side=TOP)
-        details_frame = Frame(self)
-        details_frame.pack(side=TOP)
-        Label(details_frame, text=f'Duration: {self.duration}').pack(side=LEFT)
-        Label(details_frame, text=f'Size: {round(self.size / (1024 * 1024), 2)}MB' if self.size else 'unknown size').pack(side=LEFT)
+        # Update UI in main thread (using after is safer, but direct tk calls from thread might work if simple, 
+        # but best practice is to schedule it. Here we cheat a bit or use proper scheduling if needed. 
+        # Tkinter isn't thread safe. We should use root.after or similar. 
+        # But since we are in a class, we can use self.after)
+        self.size = parsed_info['size']
+        self.formats = parsed_info['formats']
+
+        if isinstance(self.ydl_opts['outtmpl'], dict):
+            self.ydl_opts['outtmpl']['default'] = self.ydl_opts['outtmpl']['default'].replace('TITLE', self.title)
+        else:
+            self.ydl_opts['outtmpl'] = self.ydl_opts['outtmpl'].replace('TITLE', self.title)
+
+        # Update UI in main thread (using after is safer, but direct tk calls from thread might work if simple, 
+        # but best practice is to schedule it. Here we cheat a bit or use proper scheduling if needed. 
+        # Tkinter isn't thread safe. We should use root.after or similar. 
+        # But since we are in a class, we can use self.after)
+        self.after(0, self._update_ui_after_extraction)
+
+    def _update_ui_after_extraction(self):
+        if isinstance(self.ydl_opts['outtmpl'], dict):
+            self.ydl_opts['outtmpl']['default'] = self.ydl_opts['outtmpl']['default'].replace('TITLE', self.title)
+        else:
+            self.ydl_opts['outtmpl'] = self.ydl_opts['outtmpl'].replace('TITLE', self.title)
+
+        self.title_label.config(text=self.title)
+        Label(self.details_frame, text=f'Duration: {self.duration}').pack(side=LEFT)
+        Label(self.details_frame, text=f'Size: {round(self.size / (1024 * 1024), 2)}MB' if self.size else 'unknown size').pack(side=LEFT)
         format_str = ''
         if self.formats['video']: format_str += f'Video: {self.formats["video"]["resolution"]}@{self.formats["video"]["fps"]}fps {self.formats["video"]["codec"]} {"HDR" if self.formats["video"]["hdr"] else ""}'
         if self.formats['audio']: format_str += f'Audio: {self.formats["audio"]["sample_rate"]} {self.formats["audio"]["bitrate"]} {self.formats["audio"]["codec"]}'
-        Label(details_frame, text=format_str).pack(side=LEFT)
-        Label(self, text=f'Save to: {path}').pack(side=TOP)
+        Label(self.details_frame, text=format_str).pack(side=LEFT)
+
+        Label(self, text=f'Save to: {self.path}').pack(side=TOP)  # Show path roughly
+
+        # Re-pack status label to be at bottom
+        self.status_label.pack_forget()
         self.progress_bar = Progressbar(self, orient=HORIZONTAL, length=100, mode='determinate', variable=self.progress, value=0)
         self.progress_bar.pack(side=TOP, fill=X, expand=True, padx=10)
-        Label(self, textvariable=self.status, anchor=CENTER).pack(side=TOP, fill=X, expand=True, padx=10)
-        self.pack(side=TOP, fill=X, pady=(0, 5), ipadx=5)
+        self.status_label.pack(side=TOP, fill=X, expand=True, padx=10)
+
+        self.extract_info_succeed = True
+        self.extracted = True
+        self.extracting = False
+        self.status.set('Ready to download')
 
     def start_task(self):
         global ongoing_task
         status('Downloading')
+        self.status.set('Starting download...')
         self.thread = threading.Thread(target=download, args=(self.url, self.ydl_opts), daemon=True)
         self.thread.start()
         ongoing_task = True
@@ -245,7 +317,10 @@ class DownloadTask(Frame):
             percent_str = percent_str_regex.search(d['_percent_str'])
             if percent_str:
                 percent_str = percent_str.group()
-                self.status.set(f'Downloading: {d["_default_template"]}')
+                # Strip ANSI codes from status string
+                ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+                clean_status = ansi_escape.sub('', d["_default_template"])
+                self.status.set(f'Downloading: {clean_status}')
                 self.progress.set(int(float(percent_str.rstrip('%'))))
         elif d['status'] == 'finished':  # may have postprocessing later but can start downloading next task already since postprocessing no need internet and is usually fast
             if self in download_queue: download_queue.remove(self)
@@ -296,10 +371,10 @@ def status(text: Any, log: bool = True):
 
 
 def parse_info(info: dict, best_format_only: bool = True) -> dict:
-    title = info['title']
-    duration = info['duration_string']
+    title = info.get('title', 'Unknown Title')
+    duration = info.get('duration_string', 'Unknown Duration')
     size = info.get('filesize', info.get('filesize_approx', 0))
-    subtitles = info['subtitles']
+    subtitles = info.get('subtitles', {})
     if best_format_only:  # only 1 for video and/or 1 for audio
         if 'requested_formats' in info:  # best video AND best audio
             temp = [parse_format(f) for f in info['requested_formats']]  # best video/best audio only
@@ -308,13 +383,15 @@ def parse_info(info: dict, best_format_only: bool = True) -> dict:
                 if f['video']: formats['video'] = f['video']
                 if f['audio']: formats['audio'] = f['audio']
         else:  # best video OR audio only
-            format_id = info['format_id']
-            for f in info['formats']:
-                if f['format_id'] == format_id:
-                    formats = parse_format(f)
-                    break
+            format_id = info.get('format_id')
+            formats = {}
+            if format_id and 'formats' in info:
+                for f in info['formats']:
+                    if f['format_id'] == format_id:
+                        formats = parse_format(f)
+                        break
     else:
-        formats = [parse_format(f) for f in info['formats'] if f.get('format_note', '') != 'storyboard' and (f.get('vcodec', 'none') != 'none' or f.get('acodec', 'none') != 'none') and f.get('url', '')]
+        formats = [parse_format(f) for f in info.get('formats', []) if f.get('format_note', '') != 'storyboard' and (f.get('vcodec', 'none') != 'none' or f.get('acodec', 'none') != 'none') and f.get('url', '')]
     # noinspection PyUnboundLocalVariable
     return {'title': title, 'duration': duration, 'size': size, 'subtitles': subtitles, 'formats': formats}
 
@@ -340,19 +417,19 @@ def parse_format(format: dict) -> dict:
     return parsed
 
 
-def check_url(url: str) -> bool:
+def is_valid_url(url: str) -> bool:
     try:
-        requests.get(url)
+        result = urllib.parse.urlparse(url)
+        return all([result.scheme, result.netloc])
     except:
         return False
-    return True
 
 
 def handle_download_video_best(url: str, path: str):
     if not url:
         messagebox.showerror('Error', 'URL is empty!')
         return
-    if not check_url(url):
+    if not is_valid_url(url):
         messagebox.showerror('Error', 'URL is invalid!')
         return
     ydl_opts = ydl_base_opts.copy()
@@ -364,7 +441,7 @@ def handle_download_audio_best(url: str, path: str):
     if not url:
         messagebox.showerror('Error', 'URL is empty!')
         return
-    if not check_url(url):
+    if not is_valid_url(url):
         messagebox.showerror('Error', 'URL is invalid!')
         return
     ydl_opts = ydl_base_opts.copy()
@@ -378,105 +455,169 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
     if not url:
         messagebox.showerror('Error', 'URL is empty!')
         return
-    if not check_url(url):
+    if not is_valid_url(url):
         messagebox.showerror('Error', 'URL is invalid!')
         return
     if not ydl_opts: ydl_opts = ydl_base_opts.copy()
-    status('Extracting info')
-    info = extract_info(url, ydl_opts)
-    if not info:
-        status('Ready')
-        return
-    parsed_info = parse_info(info, best_format_only=False)
-    details_window = Toplevel(takefocus=True)  # no need mainloop here as below we use the general global mainloop function
-    details_window.title('Extracted Info')
-    Label(details_window, text=f'{parsed_info["title"]} ({parsed_info["duration"]})', anchor=CENTER).pack(side=TOP, fill=X, expand=True, padx=10)
 
-    scroll_container_frame = Frame(details_window)
-    scroll_container_frame.pack(expand=True, fill=BOTH, side=TOP)
-    scrollableFrame = ScrolledWindow(scroll_container_frame)
-    formats_frame = LabelFrame(scrollableFrame.scrollwindow, text='Download Options')
-    formats_frame.pack(side=TOP, fill=BOTH, expand=True, padx=(10, 10), pady=(10, 0))
-    formats = parsed_info['formats']
+    # Disable button to prevent spamming
+    download_info_button.config(state=DISABLED)
 
-    # noinspection PyArgumentList
-    def on_select_single_format(*args):
-        if video_only_formats[video_selected_format.get()] is None and audio_only_formats[audio_selected_format.get()] is None:  # if both selected nothing, unlock radio buttons
-            for radio_button in radiobutton_frame.winfo_children():
-                radio_button.configure(state=NORMAL)
-            selected_format.set('')
-        else:
-            for radio_button in radiobutton_frame.winfo_children():
-                radio_button.configure(state=DISABLED)
-            selected = []
-            if video_only_formats[video_selected_format.get()]: selected.append(video_only_formats[video_selected_format.get()])
-            if audio_only_formats[audio_selected_format.get()]: selected.append(audio_only_formats[audio_selected_format.get()])
-            selected_format.set('+'.join(selected))  # allow 1 only
-        try:
-            if video_only_formats[video_selected_format.get()] is None and audio_only_formats[audio_selected_format.get()] is not None:
-                audio_convert_selector.configure(state=NORMAL)
+    # Create loading popup
+    loading_popup = Toplevel(takefocus=True)
+    loading_popup.title('Loading...')
+    Label(loading_popup, text='Extracting info, please wait...').pack(padx=20, pady=20)
+    loading_popup.update()
+
+    def on_loading_close():
+        loading_popup.destroy()
+        download_info_button.config(state=NORMAL)
+
+    loading_popup.protocol("WM_DELETE_WINDOW", on_loading_close)
+
+    def _extract_thread():
+        status('Extracting info')
+        info = extract_info(url, ydl_opts)
+        # Check if loading popup still exists (might be closed by user)
+        if not loading_popup.winfo_exists():
+            status('Ready')
+            return
+
+        loading_popup.destroy()
+        if not info:
+            status('Ready')
+            # Schedule error message on main thread
+            root.after(0, lambda: messagebox.showerror('Error', 'URL is invalid or extraction failed!'))
+            # Re-enable button
+            root.after(0, lambda: download_info_button.config(state=NORMAL))
+            return
+
+        # Schedule UI update on main thread
+        root.after(0, lambda: _show_details(info))
+
+    def _show_details(info):
+        parsed_info = parse_info(info, best_format_only=False)
+        details_window = Toplevel(takefocus=True)  # no need mainloop here as below we use the general global mainloop function
+        details_window.title('Extracted Info')
+
+        def on_details_close():
+            details_window.destroy()
+            download_info_button.config(state=NORMAL)
+
+        details_window.protocol("WM_DELETE_WINDOW", on_details_close)
+
+        Label(details_window, text=f'{parsed_info["title"]} ({parsed_info["duration"]})', anchor=CENTER).pack(side=TOP, fill=X, expand=True, padx=10)
+
+        scroll_container_frame = Frame(details_window)
+        scroll_container_frame.pack(expand=True, fill=BOTH, side=TOP)
+        scrollableFrame = ScrolledWindow(scroll_container_frame)
+        formats_frame = LabelFrame(scrollableFrame.scrollwindow, text='Download Options')
+        formats_frame.pack(side=TOP, fill=BOTH, expand=True, padx=(10, 10), pady=(10, 0))
+        formats = parsed_info['formats']
+
+        # noinspection PyArgumentList
+        def on_select_single_format(*args):
+            if video_only_formats[video_selected_format.get()] is None and audio_only_formats[audio_selected_format.get()] is None:  # if both selected nothing, unlock radio buttons
+                for radio_button in radiobutton_frame.winfo_children():
+                    radio_button.configure(state=NORMAL)
+                selected_format.set('')
             else:
-                audio_convert_selector.configure(state=DISABLED)
-                audio_convert_quality_selector.configure(state=DISABLED)
-        except NameError:  # if audio convert selector is not defined yet
-            pass
+                for radio_button in radiobutton_frame.winfo_children():
+                    radio_button.configure(state=DISABLED)
+                selected = []
+                if video_only_formats[video_selected_format.get()]: selected.append(video_only_formats[video_selected_format.get()])
+                if audio_only_formats[audio_selected_format.get()]: selected.append(audio_only_formats[audio_selected_format.get()])
+                selected_format.set('+'.join(selected))  # allow 1 only
+            try:
+                if video_only_formats[video_selected_format.get()] is None and audio_only_formats[audio_selected_format.get()] is not None:
+                    audio_convert_selector.configure(state=NORMAL)
+                else:
+                    audio_convert_selector.configure(state=DISABLED)
+                    audio_convert_quality_selector.configure(state=DISABLED)
+            except NameError:  # if audio convert selector is not defined yet
+                pass
 
-    def on_select_format(*args):
-        download_button.configure(state=NORMAL if selected_format.get() else DISABLED)
+        def on_select_format(*args):
+            download_button.configure(state=NORMAL if selected_format.get() else DISABLED)
 
-    def on_select_audio_convert_format(*args):
-        audio_convert_quality_selector.configure(state=NORMAL if audio_convert_format.get() != 'Do not convert' else DISABLED)
+        def on_select_audio_convert_format(*args):
+            audio_convert_quality_selector.configure(state=NORMAL if audio_convert_format.get() != 'Do not convert' else DISABLED)
 
-    def handle_download():
-        nonlocal ydl_opts
-        ydl_opts['format'] = selected_format.get()
-        if video_only_formats[video_selected_format.get()] is None and audio_only_formats[audio_selected_format.get()] is not None and valid_audio_convert_formats[audio_convert_format.get()] is not None:
-            ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': valid_audio_convert_formats[audio_convert_format.get()], 'preferredquality': audio_convert_quality_values[audio_convert_quality.get()]}]  # 0 highest, 10 lowest.
-        ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
-        download_queue.append(DownloadTask(url, path, ydl_opts, queue_frame))
-        ydl_opts = ydl_base_opts.copy()  # reset for next task
-        details_window.destroy()
-        root.lift()
+        def handle_download():
+            nonlocal ydl_opts
+            ydl_opts['format'] = selected_format.get()
+            if video_only_formats[video_selected_format.get()] is None and audio_only_formats[audio_selected_format.get()] is not None and valid_audio_convert_formats[audio_convert_format.get()] is not None:
+                ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': valid_audio_convert_formats[audio_convert_format.get()], 'preferredquality': audio_convert_quality_values[audio_convert_quality.get()]}]  # 0 highest, 10 lowest.
+            ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
 
-    download_button = Button(scrollableFrame.scrollwindow, text='Download', command=handle_download)  # have to define first else callbacks below complain
-    selected_format = StringVar()
-    selected_format.trace('w', on_select_format)
-    video_only_formats, audio_only_formats = {'Select video format': None}, {'Select audio format': None}  # {text: value} except for None
-    radiobutton_frame = Frame(formats_frame, relief='groove', borderwidth=3)
-    radiobutton_frame.pack(side=TOP, fill=X, expand=True)
-    for f in formats:
-        if f['video'] and f['audio']:  # video AND audio
-            Radiobutton(radiobutton_frame, variable=selected_format, value=f['format_id'],
-                        text=f'Video: {f["video"]["resolution"]}@{f["video"]["fps"]}fps {f["video"]["codec"]} {"HDR" if f["video"]["hdr"] else ""}\n'
-                             f'Audio: {f["audio"]["sample_rate"]} {f["audio"]["bitrate"]} {f["audio"]["codec"]}\n'
-                             f'File extension: {f["ext"]} Size: ' + (f'{round(f["size"] / (1024 * 1024), 2)}MB' if f["size"] else 'unknown size')).pack(side=TOP, fill=X, expand=True, pady=(0, 10))
-        else:  # video only or audio only
-            if f['video']: video_only_formats[f'{f["video"]["resolution"]}@{f["video"]["fps"]}fps {f["video"]["codec"]} {"HDR" if f["video"]["hdr"] else ""}'] = f['format_id']
-            if f['audio']: audio_only_formats[f'{f["audio"]["sample_rate"]} {f["audio"]["bitrate"]} {f["audio"]["codec"]}'] = f['format_id']
-    if not len(radiobutton_frame.winfo_children()): Label(radiobutton_frame, text='No stream containing both video and audio available', anchor=CENTER).pack(side=TOP, fill=X, expand=True)
+            # Construct task_info for DownloadTask
+            task_info = {
+                'title': parsed_info['title'],
+                'duration_string': parsed_info['duration'],
+                'filesize': parsed_info['size'],
+                'formats': {'video': None, 'audio': None}
+            }
 
-    custom_formats_frame = LabelFrame(formats_frame, text='Customize', borderwidth=3)
-    custom_formats_frame.pack(side=TOP, fill=X, expand=True)
-    video_selected_format = StringVar(value='Select video format')
-    video_selected_format.trace('w', on_select_single_format)
-    audio_selected_format = StringVar(value='Select audio format')
-    audio_selected_format.trace('w', on_select_single_format)
-    OptionMenu(custom_formats_frame, video_selected_format, 'Select video format', *video_only_formats.keys()).pack(side=TOP, fill=X, expand=True, pady=(0, 10))
-    OptionMenu(custom_formats_frame, audio_selected_format, 'Select audio format', *audio_only_formats.keys()).pack(side=TOP, fill=X, expand=True, pady=(0, 10))
-    audio_convert_format = StringVar(value='Do not convert')
-    valid_audio_convert_formats = {'Do not convert': None, 'AAC (.m4a)': 'aac', 'ALAC (.m4a)': 'alac', 'FLAC (.flac)': 'flac', 'm4a (.m4a)': 'm4a', 'mp3 (.mp3)': 'mp3', 'Opus (.opus)': 'opus', 'Vorbis (.ogg)': 'vorbis', 'WAV (.wav)': 'wav'}
-    audio_convert_frame = LabelFrame(formats_frame, text='Convert audio format to', borderwidth=3)
-    audio_convert_frame.pack(side=TOP, fill=X, expand=True)
-    audio_convert_selector = OptionMenu(audio_convert_frame, audio_convert_format, 'Do not convert', *valid_audio_convert_formats.keys(), command=on_select_audio_convert_format)
-    audio_convert_selector.pack(side=TOP, fill=X, expand=True, pady=(5, 5))
-    audio_convert_selector.configure(state=DISABLED)
-    audio_convert_quality = StringVar(value='5')
-    audio_convert_quality_values = {k: v for v, k in enumerate(['0 (Highest Quality)', '1', '2', '3', '4', '5 (Medium Quality)', '6', '7', '8', '9', '10 (Lowest Quality)'])}
-    audio_convert_quality_selector = OptionMenu(audio_convert_frame, audio_convert_quality, '5 (Medium Quality)', *audio_convert_quality_values)
-    audio_convert_quality_selector.pack(side=TOP, fill=X, expand=True, pady=(5, 5))
-    audio_convert_quality_selector.configure(state=DISABLED)
-    download_button.pack(side=TOP, fill=X, expand=True, padx=10, pady=(0, 10))  # defined at top
-    status('Ready')
+            # Find selected formats
+            sel_fmt = selected_format.get()
+            if sel_fmt:
+                sel_ids = sel_fmt.split('+')
+                for f in parsed_info['formats']:
+                    if f['format_id'] in sel_ids:
+                        if f['video']: task_info['formats']['video'] = f['video']
+                        if f['audio']: task_info['formats']['audio'] = f['audio']
+
+            download_queue.append(DownloadTask(url, path, ydl_opts, queue_frame, task_info))
+            ydl_opts = ydl_base_opts.copy()  # reset for next task
+            details_window.destroy()
+            root.lift()
+            download_info_button.config(state=NORMAL)
+
+        download_button = Button(scrollableFrame.scrollwindow, text='Download', command=handle_download)  # have to define first else callbacks below complain
+        selected_format = StringVar()
+        selected_format.trace('w', on_select_format)
+        video_only_formats, audio_only_formats = {'Select video format': None}, {'Select audio format': None}  # {text: value} except for None
+        radiobutton_frame = Frame(formats_frame, relief='groove', borderwidth=3)
+        radiobutton_frame.pack(side=TOP, fill=X, expand=True)
+        for f in formats:
+            if f['video'] and f['audio']:  # video AND audio
+                Radiobutton(radiobutton_frame, variable=selected_format, value=f['format_id'],
+                            text=f'Video: {f["video"]["resolution"]}@{f["video"]["fps"]}fps {f["video"]["codec"]} {"HDR" if f["video"]["hdr"] else ""}\n'
+                                 f'Audio: {f["audio"]["sample_rate"]} {f["audio"]["bitrate"]} {f["audio"]["codec"]}\n'
+                                 f'File extension: {f["ext"]} Size: ' + (f'{round(f["size"] / (1024 * 1024), 2)}MB' if f["size"] else 'unknown size')).pack(side=TOP, fill=X, expand=True, pady=(0, 10))
+            else:  # video only or audio only
+                if f['video']: video_only_formats[f'{f["video"]["resolution"]}@{f["video"]["fps"]}fps {f["video"]["codec"]} {"HDR" if f["video"]["hdr"] else ""}'] = f['format_id']
+                if f['audio']: audio_only_formats[f'{f["audio"]["sample_rate"]} {f["audio"]["bitrate"]} {f["audio"]["codec"]}'] = f['format_id']
+        if not len(radiobutton_frame.winfo_children()): Label(radiobutton_frame, text='No stream containing both video and audio available', anchor=CENTER).pack(side=TOP, fill=X, expand=True)
+
+        custom_formats_frame = LabelFrame(formats_frame, text='Customize', borderwidth=3)
+        custom_formats_frame.pack(side=TOP, fill=X, expand=True)
+        video_selected_format = StringVar(value='Select video format')
+        video_selected_format.trace('w', on_select_single_format)
+        audio_selected_format = StringVar(value='Select audio format')
+        audio_selected_format.trace('w', on_select_single_format)
+        OptionMenu(custom_formats_frame, video_selected_format, 'Select video format', *video_only_formats.keys()).pack(side=TOP, fill=X, expand=True, pady=(0, 10))
+        OptionMenu(custom_formats_frame, audio_selected_format, 'Select audio format', *audio_only_formats.keys()).pack(side=TOP, fill=X, expand=True, pady=(0, 10))
+        audio_convert_format = StringVar(value='Do not convert')
+        valid_audio_convert_formats = {'Do not convert': None, 'AAC (.m4a)': 'aac', 'ALAC (.m4a)': 'alac', 'FLAC (.flac)': 'flac', 'm4a (.m4a)': 'm4a', 'mp3 (.mp3)': 'mp3', 'Opus (.opus)': 'opus', 'Vorbis (.ogg)': 'vorbis', 'WAV (.wav)': 'wav'}
+        audio_convert_frame = LabelFrame(formats_frame, text='Convert audio format to', borderwidth=3)
+        audio_convert_frame.pack(side=TOP, fill=X, expand=True)
+        audio_convert_selector = OptionMenu(audio_convert_frame, audio_convert_format, 'Do not convert', *valid_audio_convert_formats.keys(), command=on_select_audio_convert_format)
+        audio_convert_selector.pack(side=TOP, fill=X, expand=True, pady=(5, 5))
+        audio_convert_selector.configure(state=DISABLED)
+        audio_convert_quality = StringVar(value='5')
+        # FFmpeg uses 0 for highest quality and 10 for lowest. We want to show 10 as highest to user.
+        # So we map UI '10' -> 0, '9' -> 1, ..., '0' -> 10.
+        audio_convert_quality_values = {f'{10 - i} {"(Highest Quality)" if i == 0 else "(Lowest Quality)" if i == 10 else "(Medium Quality)" if i == 5 else ""}': i for i in range(11)}
+        # Sort keys so they appear in order 10, 9, ... 0 in the dropdown
+        sorted_keys = sorted(audio_convert_quality_values.keys(), key=lambda x: int(x.split()[0]), reverse=True)
+        audio_convert_quality_selector = OptionMenu(audio_convert_frame, audio_convert_quality, '5 (Medium Quality)', *sorted_keys)
+        audio_convert_quality_selector.pack(side=TOP, fill=X, expand=True, pady=(5, 5))
+        audio_convert_quality_selector.configure(state=DISABLED)
+        download_button.pack(side=TOP, fill=X, expand=True, padx=10, pady=(0, 10))  # defined at top
+        status('Ready')
+
+    threading.Thread(target=_extract_thread, daemon=True).start()
 
 
 def select_save_path():
@@ -495,12 +636,14 @@ def select_save_path():
 def do_tasks():
     if download_queue and not ongoing_task:
         task = download_queue[0]
-        if task.extract_info_succeed:
+        if not task.extracted and not task.extracting:
+            task.start_extraction()
+        elif task.extracted and task.extract_info_succeed:
             task.start_task()
-        else:
+        elif task.extracted and not task.extract_info_succeed:
             download_queue.remove(task)
             status('Ready')
-    queue_frame.after(1000, do_tasks)
+    queue_frame.after(500, do_tasks)
     root.update()
 
 
