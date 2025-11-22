@@ -1,4 +1,6 @@
 # YT-DLP GUI
+[![Windows Build](https://github.com/aliencaocao/ytdlp-gui/actions/workflows/windows_build.yml/badge.svg)](https://github.com/aliencaocao/ytdlp-gui/actions/workflows/windows_build.yml)
+[![Linux Build](https://github.com/aliencaocao/ytdlp-gui/actions/workflows/linux_build.yml/badge.svg)](https://github.com/aliencaocao/ytdlp-gui/actions/workflows/linux_build.yml)
 
 This is (yet another) yt-dlp GUI built with pure Python and Tkinter. It is still in early development stage so only basic functions are developed and functional.
 
