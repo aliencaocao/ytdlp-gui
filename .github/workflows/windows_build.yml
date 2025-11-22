@@ -34,7 +34,6 @@ jobs:
       run: |
         C:\msys64\usr\bin\wget.exe https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip
         7z x deno-x86_64-pc-windows-msvc.zip
-        cp deno.exe .
         ./deno --version
     - name: Create version.txt for PyInstaller
       run: create-version-file version.yml --outfile version.txt

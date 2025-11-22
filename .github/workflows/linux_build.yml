@@ -26,6 +26,7 @@ jobs:
       run: |
         wget https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip
         unzip deno-x86_64-unknown-linux-gnu.zip
+        ls -la -R
         chmod +x deno
         ./deno --version
     - name: PyInstaller Linux
