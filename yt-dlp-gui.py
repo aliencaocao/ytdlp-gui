@@ -1,3 +1,4 @@
+import copy
 import ctypes
 import logging
 import os
@@ -69,6 +70,7 @@ ydl_base_opts: dict[str, Any] = {'outtmpl': 'TITLE-%(id)s.%(ext)s',
                                  'ffmpeg_location': get_res_path('ffmpeg.exe') if sys.platform == 'win32' else 'ffmpeg',
                                  }
 percent_str_regex = re.compile(r'\d{1,3}\.\d{1,2}%')
+ansi_escape_regex = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 
 def handle_private_video(e: object, url: str, ydl_opts: dict, func: Callable[[str, dict, bool], Union[dict, bool]]) -> Union[dict, bool]:
@@ -110,7 +112,7 @@ def handle_private_video(e: object, url: str, ydl_opts: dict, func: Callable[[st
 
 def download(urls: Union[list, str], ydl_opts=None, ignore_error: bool = False) -> bool:
     """Return whether download is successful"""
-    if ydl_opts is None: ydl_opts = ydl_base_opts.copy()
+    if ydl_opts is None: ydl_opts = copy.deepcopy(ydl_base_opts)
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download(urls if isinstance(urls, list) else [urls])
@@ -145,7 +147,7 @@ def extract_flat_info(url: str) -> dict:
     """Quickly extract playlist metadata without full format extraction.
     Uses extract_flat='in_playlist' so only titles/IDs/durations are fetched.
     For single videos, yt-dlp returns the normal info dict (no 'entries' key)."""
-    ydl_opts = ydl_base_opts.copy()
+    ydl_opts = copy.deepcopy(ydl_base_opts)
     ydl_opts['extract_flat'] = 'in_playlist'
     ydl_opts['quiet'] = True
     ydl_opts['no_warnings'] = True
@@ -267,18 +269,6 @@ class DownloadTask(Frame):
         parsed_info = parse_info(info)
         self.title = sanitize(parsed_info['title'])
         self.duration = parsed_info['duration']
-        # Sanitize title for filename
-        self.title = sanitize(self.title)
-
-        if isinstance(self.ydl_opts['outtmpl'], dict):
-            self.ydl_opts['outtmpl']['default'] = self.ydl_opts['outtmpl']['default'].replace('TITLE', self.title)
-        else:
-            self.ydl_opts['outtmpl'] = self.ydl_opts['outtmpl'].replace('TITLE', self.title)
-
-        # Update UI in main thread (using after is safer, but direct tk calls from thread might work if simple, 
-        # but best practice is to schedule it. Here we cheat a bit or use proper scheduling if needed. 
-        # Tkinter isn't thread safe. We should use root.after or similar. 
-        # But since we are in a class, we can use self.after)
         self.size = parsed_info['size']
         self.formats = parsed_info['formats']
 
@@ -287,18 +277,9 @@ class DownloadTask(Frame):
         else:
             self.ydl_opts['outtmpl'] = self.ydl_opts['outtmpl'].replace('TITLE', self.title)
 
-        # Update UI in main thread (using after is safer, but direct tk calls from thread might work if simple, 
-        # but best practice is to schedule it. Here we cheat a bit or use proper scheduling if needed. 
-        # Tkinter isn't thread safe. We should use root.after or similar. 
-        # But since we are in a class, we can use self.after)
         self.after(0, self._update_ui_after_extraction)
 
     def _update_ui_after_extraction(self):
-        if isinstance(self.ydl_opts['outtmpl'], dict):
-            self.ydl_opts['outtmpl']['default'] = self.ydl_opts['outtmpl']['default'].replace('TITLE', self.title)
-        else:
-            self.ydl_opts['outtmpl'] = self.ydl_opts['outtmpl'].replace('TITLE', self.title)
-
         self.title_label.config(text=self.title)
         Label(self.details_frame, text=f'Duration: {self.duration}').pack(side=LEFT)
         Label(self.details_frame, text=f'Size: {round(self.size / (1024 * 1024), 2)}MB' if self.size else 'unknown size').pack(side=LEFT)
@@ -334,9 +315,7 @@ class DownloadTask(Frame):
             percent_str = percent_str_regex.search(d['_percent_str'])
             if percent_str:
                 percent_str = percent_str.group()
-                # Strip ANSI codes from status string
-                ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-                clean_status = ansi_escape.sub('', d["_default_template"])
+                clean_status = ansi_escape_regex.sub('', d["_default_template"])
                 self.status.set(f'Downloading: {clean_status}')
                 self.progress.set(int(float(percent_str.rstrip('%'))))
         elif d['status'] == 'finished':  # may have postprocessing later but can start downloading next task already since postprocessing no need internet and is usually fast
@@ -566,14 +545,16 @@ def show_playlist_selector(playlist_info: dict, playlist_url: str, path: str, mo
                          command=update_button_text)
         cb.pack(side=TOP, anchor=W, padx=5, pady=1)
 
-    # Bind mousewheel scrolling to all children so scrolling works when
-    # hovering over checkboxes (not just the bare frame background).
-    def _bind_mousewheel_tree(widget):
-        widget.bind("<MouseWheel>", lambda e: scrollable.canv.yview_scroll(int(-1 * (e.delta / 120)), "units"))
-        for child in widget.winfo_children():
-            _bind_mousewheel_tree(child)
+    # Bind mousewheel scrolling at the canvas level so it works over all children
+    scrollable.canv.bind_all("<MouseWheel>", lambda e: scrollable.canv.yview_scroll(int(-1 * (e.delta / 120)), "units"))
 
-    _bind_mousewheel_tree(list_frame)
+    def _unbind_on_destroy(e):
+        try:
+            scrollable.canv.unbind_all("<MouseWheel>")
+        except TclError:
+            pass
+
+    popup.bind("<Destroy>", _unbind_on_destroy)
 
     # Auto-size width to fit content, capped at 50% screen width for initial size.
     # User can still manually resize wider than the cap.
@@ -589,14 +570,14 @@ def _queue_selected_entries(entries: list, playlist_url: str, path: str, mode: s
     if mode == 'video_best':
         for entry in entries:
             video_url = get_entry_url(entry, playlist_url)
-            ydl_opts = ydl_base_opts.copy()
+            ydl_opts = copy.deepcopy(ydl_base_opts)
             ydl_opts['noplaylist'] = True
             ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
             download_queue.append(DownloadTask(video_url, path, ydl_opts, queue_frame))
     elif mode == 'audio_best':
         for entry in entries:
             video_url = get_entry_url(entry, playlist_url)
-            ydl_opts = ydl_base_opts.copy()
+            ydl_opts = copy.deepcopy(ydl_base_opts)
             ydl_opts['noplaylist'] = True
             ydl_opts.update({'format': 'bestaudio'})
             ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
@@ -691,14 +672,14 @@ def _handle_single(url: str, path: str, mode: str):
 
 
 def handle_download_video_best(url: str, path: str):
-    ydl_opts = ydl_base_opts.copy()
+    ydl_opts = copy.deepcopy(ydl_base_opts)
     ydl_opts['noplaylist'] = True
     ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
     download_queue.append(DownloadTask(url, path, ydl_opts, queue_frame))
 
 
 def handle_download_audio_best(url: str, path: str):
-    ydl_opts = ydl_base_opts.copy()
+    ydl_opts = copy.deepcopy(ydl_base_opts)
     ydl_opts['noplaylist'] = True
     ydl_opts.update({'format': 'bestaudio'})
     ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
@@ -716,7 +697,7 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None,
         messagebox.showerror('Error', 'URL is invalid!')
         if on_complete: on_complete()
         return
-    if not ydl_opts: ydl_opts = ydl_base_opts.copy()
+    if not ydl_opts: ydl_opts = copy.deepcopy(ydl_base_opts)
     ydl_opts['noplaylist'] = True
 
     # Disable button to prevent spamming
@@ -736,25 +717,25 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None,
     loading_popup.protocol("WM_DELETE_WINDOW", on_loading_close)
 
     def _extract_thread():
-        status('Extracting info')
         info = extract_info(url, ydl_opts)
-        # Check if loading popup still exists (might be closed by user)
-        if not loading_popup.winfo_exists():
-            status('Ready')
-            return
 
-        loading_popup.destroy()
-        if not info:
-            status('Ready')
-            # Schedule error message on main thread
-            root.after(0, lambda: messagebox.showerror('Error', 'URL is invalid or extraction failed!'))
-            # Re-enable button
-            root.after(0, lambda: download_info_button.config(state=NORMAL))
-            if on_complete: root.after(0, on_complete)
-            return
+        def _handle_result():
+            # Check if loading popup still exists (might be closed by user)
+            if not loading_popup.winfo_exists():
+                status('Ready')
+                return
 
-        # Schedule UI update on main thread
-        root.after(0, lambda: _show_details(info))
+            loading_popup.destroy()
+            if not info:
+                status('Ready')
+                messagebox.showerror('Error', 'URL is invalid or extraction failed!')
+                download_info_button.config(state=NORMAL)
+                if on_complete: on_complete()
+                return
+
+            _show_details(info)
+
+        root.after(0, _handle_result)
 
     def _show_details(info):
         parsed_info = parse_info(info, best_format_only=False)
@@ -843,7 +824,7 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None,
                     extra_opts['postprocessor_hooks'] = []
                     download_queue.append(DownloadTask(extra_url, path, extra_opts, queue_frame))
 
-            ydl_opts = ydl_base_opts.copy()  # reset for next task
+            ydl_opts = copy.deepcopy(ydl_base_opts)  # reset for next task
             details_window.destroy()
             root.lift()
             download_info_button.config(state=NORMAL)
@@ -904,8 +885,8 @@ def select_save_path():
     if sys.platform == 'win32':
         winreg.SetValue(winreg.HKEY_CURRENT_USER, 'Software\\YT-DLP GUI', winreg.REG_SZ, path)
     else:
-        os.makedirs('~/.config/yt-dlp', exist_ok=True)
-        with open('~/.config/yt-dlp/last_path.txt', 'w+') as f:
+        os.makedirs(os.path.expanduser('~/.config/yt-dlp'), exist_ok=True)
+        with open(os.path.expanduser('~/.config/yt-dlp/last_path.txt'), 'w+') as f:
             f.write(path)
 
 
@@ -920,7 +901,6 @@ def do_tasks():
             download_queue.remove(task)
             status('Ready')
     queue_frame.after(500, do_tasks)
-    root.update()
 
 
 initial_dir = os.getcwd()
@@ -929,8 +909,8 @@ if sys.platform == 'win32':
         initial_dir = winreg.QueryValue(winreg.HKEY_CURRENT_USER, 'Software\\YT-DLP GUI')
     except FileNotFoundError:  # if key not found
         pass
-elif os.path.isfile('~/.config/yt-dlp/last_path.txt'):
-    with open('~/.config/yt-dlp/last_path.txt', 'r') as f:
+elif os.path.isfile(os.path.expanduser('~/.config/yt-dlp/last_path.txt')):
+    with open(os.path.expanduser('~/.config/yt-dlp/last_path.txt'), 'r') as f:
         initial_dir = f.read()
 
 url_input_frame = Frame(root)
