@@ -59,7 +59,7 @@ ydl_base_opts: dict[str, Any] = {'outtmpl': 'TITLE-%(id)s.%(ext)s',
                                  'overwrites': True,
                                  'cachedir': False,
                                  'age_limit': 100,
-                                 'noplaylist': True,
+                                 'noplaylist': False,
                                  'live_from_start': True,
                                  'no-video-multistreams': True,
                                  'no-audio-multistreams': True,
@@ -376,15 +376,14 @@ def parse_info(info: dict, best_format_only: bool = True) -> dict:
     size = info.get('filesize', info.get('filesize_approx', 0))
     subtitles = info.get('subtitles', {})
     if best_format_only:  # only 1 for video and/or 1 for audio
+        formats = {'video': None, 'audio': None}
         if 'requested_formats' in info:  # best video AND best audio
             temp = [parse_format(f) for f in info['requested_formats']]  # best video/best audio only
-            formats = {}
             for f in temp:
                 if f['video']: formats['video'] = f['video']
                 if f['audio']: formats['audio'] = f['audio']
         else:  # best video OR audio only
             format_id = info.get('format_id')
-            formats = {}
             if format_id and 'formats' in info:
                 for f in info['formats']:
                     if f['format_id'] == format_id:

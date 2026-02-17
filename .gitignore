@@ -4,3 +4,5 @@ build/
 upx/
 version.txt
 test*
+__pycache__/
+*.pyc
