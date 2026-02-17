@@ -34,7 +34,7 @@ Download details page of the program (accessible by clicking "Customize Download
 * Downloading playlists
 
 ## Building
-You need Python 3.9+.
+You need Python 3.10-Python 3.14.
 1. Clone this repository.
 2. Install the dependencies with `pip install -r requirements.txt`. On Windows machines, a working ffmpeg.exe and ffprobe.exe is also needed in the same directory as the `main.py` file. You can download them from [here](https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/latest). Choose `ffmpeg-master-latest-win64-gpl.zip`.
 3. Modify `version.yml` if needed
