@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  check-update:
+  check_update:
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.check.outputs.new_version }}
@@ -41,15 +41,15 @@ jobs:
           echo "should_release=false" >> "$GITHUB_OUTPUT"
         fi
 
-  build-windows:
-    needs: check-update
-    if: needs.check-update.outputs.should_release == 'true'
+  build_windows:
+    needs: check_update
+    if: needs.check_update.outputs.should_release == 'true'
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v6
     - name: Update version.yml
       shell: bash
-      run: sed -i "s/^Version: .*/Version: ${{ needs.check-update.outputs.new_version }}/" version.yml
+      run: sed -i "s/^Version: .*/Version: ${{ needs.check_update.outputs.new_version }}/" version.yml
     - uses: actions/setup-python@v6
       with:
         python-version: '3.14'
@@ -84,9 +84,9 @@ jobs:
         upload_exe_with_name: 'yt-dlp-gui.exe'
         clean_checkout: false
 
-  build-linux:
-    needs: check-update
-    if: needs.check-update.outputs.should_release == 'true'
+  build_linux:
+    needs: check_update
+    if: needs.check_update.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -116,7 +116,7 @@ jobs:
         clean_checkout: false
 
   release:
-    needs: [check-update, build-windows, build-linux]
+    needs: [check_update, build_windows, build_linux]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -124,9 +124,9 @@ jobs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        sed -i "s/^Version: .*/Version: ${{ needs.check-update.outputs.new_version }}/" version.yml
+        sed -i "s/^Version: .*/Version: ${{ needs.check_update.outputs.new_version }}/" version.yml
         git add version.yml
-        git commit -m "Bump yt-dlp to ${{ needs.check-update.outputs.new_version }}"
+        git commit -m "Bump yt-dlp to ${{ needs.check_update.outputs.new_version }}"
         git push
     - name: Download artifacts
       uses: actions/download-artifact@v4
@@ -137,7 +137,7 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        gh release create "${{ needs.check-update.outputs.new_version }}" \
-          --title "${{ needs.check-update.outputs.new_version }}" \
+        gh release create "${{ needs.check_update.outputs.new_version }}" \
+          --title "${{ needs.check_update.outputs.new_version }}" \
           --generate-notes \
           artifacts/*
