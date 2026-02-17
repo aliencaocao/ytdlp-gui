@@ -59,7 +59,7 @@ ydl_base_opts: dict[str, Any] = {'outtmpl': 'TITLE-%(id)s.%(ext)s',
                                  'overwrites': True,
                                  'cachedir': False,
                                  'age_limit': 100,
-                                 'noplaylist': True,
+                                 'noplaylist': False,
                                  'live_from_start': True,
                                  'no-video-multistreams': True,
                                  'no-audio-multistreams': True,
@@ -138,6 +138,23 @@ def extract_info(url: str, ydl_opts: dict, ignore_error: bool = False) -> dict:
             return result
     except Exception as e:
         messagebox.showerror('Error', f'Error while extracting info: {e}')
+        return {}
+
+
+def extract_flat_info(url: str) -> dict:
+    """Quickly extract playlist metadata without full format extraction.
+    Uses extract_flat='in_playlist' so only titles/IDs/durations are fetched.
+    For single videos, yt-dlp returns the normal info dict (no 'entries' key)."""
+    ydl_opts = ydl_base_opts.copy()
+    ydl_opts['extract_flat'] = 'in_playlist'
+    ydl_opts['quiet'] = True
+    ydl_opts['no_warnings'] = True
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return ydl.sanitize_info(info) if info else {}
+    except Exception as e:
+        logger.warning(f'Flat extraction failed: {e}')
         return {}
 
 
@@ -376,15 +393,14 @@ def parse_info(info: dict, best_format_only: bool = True) -> dict:
     size = info.get('filesize', info.get('filesize_approx', 0))
     subtitles = info.get('subtitles', {})
     if best_format_only:  # only 1 for video and/or 1 for audio
+        formats = {'video': None, 'audio': None}
         if 'requested_formats' in info:  # best video AND best audio
             temp = [parse_format(f) for f in info['requested_formats']]  # best video/best audio only
-            formats = {}
             for f in temp:
                 if f['video']: formats['video'] = f['video']
                 if f['audio']: formats['audio'] = f['audio']
         else:  # best video OR audio only
             format_id = info.get('format_id')
-            formats = {}
             if format_id and 'formats' in info:
                 for f in info['formats']:
                     if f['format_id'] == format_id:
@@ -425,40 +441,283 @@ def is_valid_url(url: str) -> bool:
         return False
 
 
-def handle_download_video_best(url: str, path: str):
+def get_entry_url(entry: dict, playlist_url: str) -> str:
+    """Construct a direct video URL from a flat playlist entry.
+    For YouTube, flat entries may have 'url' as just a video ID.
+    For other extractors, 'url' may already be a full URL."""
+    entry_url = entry.get('url', '')
+    if entry_url.startswith(('http://', 'https://')):
+        return entry_url
+    # YouTube-style: url is just a video ID
+    video_id = entry_url or entry.get('id', '')
+    if video_id:
+        parsed = urllib.parse.urlparse(playlist_url)
+        if 'youtube' in parsed.netloc or 'youtu.be' in parsed.netloc:
+            return f'https://www.youtube.com/watch?v={video_id}'
+        # For other sites, try constructing from the base domain
+        return f'{parsed.scheme}://{parsed.netloc}/watch?v={video_id}'
+    return playlist_url
+
+
+def show_playlist_selector(playlist_info: dict, playlist_url: str, path: str, mode: str):
+    """Show a popup for selecting which playlist videos to download."""
+    entries = playlist_info.get('entries', [])
+    if not entries:
+        messagebox.showerror('Error', 'No videos found in playlist!')
+        return
+    entries = [e for e in entries if e is not None]
+
+    playlist_title = playlist_info.get('title', 'Unknown Playlist')
+    popup = Toplevel(takefocus=True)
+    popup.title('Select Videos')
+
+    # Header
+    header_frame = Frame(popup)
+    header_frame.pack(side=TOP, fill=X, padx=10, pady=(10, 5))
+    Label(header_frame, text=f'{playlist_title}', font=('', 11, 'bold')).pack(side=TOP, anchor=W)
+    Label(header_frame, text=f'{len(entries)} videos').pack(side=TOP, anchor=W)
+
+    # Select all checkbox
+    select_all_var = BooleanVar(value=True)
+    check_vars = []
+
+    def on_select_all():
+        val = select_all_var.get()
+        for var in check_vars:
+            var.set(val)
+        update_button_text()
+
+    select_all_check = Checkbutton(header_frame, text='Select All / Deselect All',
+                                   variable=select_all_var, command=on_select_all)
+    select_all_check.pack(side=TOP, anchor=W, pady=(5, 0))
+
+    # Scrollable list of videos
+    scroll_container = Frame(popup)
+    scroll_container.pack(expand=True, fill=BOTH, side=TOP, padx=10, pady=5)
+    scrollable = ScrolledWindow(scroll_container)
+    list_frame = scrollable.scrollwindow
+
+    # Buttons frame (created before checkboxes so update_button_text can reference them)
+    button_frame = Frame(popup)
+    button_frame.pack(side=BOTTOM, fill=X, padx=10, pady=(5, 10))
+
+    def get_selected():
+        return [entries[i] for i, var in enumerate(check_vars) if var.get()]
+
+    # Create buttons based on mode (need references for update_button_text)
+    if mode == 'customize':
+        def on_same_format():
+            selected = get_selected()
+            if not selected:
+                return
+            popup.destroy()
+            _queue_selected_entries(selected, playlist_url, path, 'customize_same')
+
+        def on_each():
+            selected = get_selected()
+            if not selected:
+                return
+            popup.destroy()
+            _queue_selected_entries(selected, playlist_url, path, 'customize_each')
+
+        same_btn = Button(button_frame, text=f'Same Format for All ({len(entries)})',
+                          command=on_same_format)
+        same_btn.pack(side=LEFT, expand=True, fill=X, padx=(0, 2))
+        each_btn = Button(button_frame, text=f'Customize Each ({len(entries)})',
+                          command=on_each)
+        each_btn.pack(side=LEFT, expand=True, fill=X, padx=(2, 0))
+    else:
+        def on_download():
+            selected = get_selected()
+            if not selected:
+                return
+            popup.destroy()
+            _queue_selected_entries(selected, playlist_url, path, mode)
+
+        dl_btn = Button(button_frame, text=f'Download Selected ({len(entries)})',
+                        command=on_download)
+        dl_btn.pack(side=LEFT, expand=True, fill=X)
+
+    Button(button_frame, text='Cancel', command=popup.destroy).pack(side=RIGHT, padx=(5, 0))
+
+    def update_button_text():
+        count = sum(1 for var in check_vars if var.get())
+        if mode == 'customize':
+            same_btn.config(text=f'Same Format for All ({count})')
+            each_btn.config(text=f'Customize Each ({count})')
+            same_btn.config(state=NORMAL if count > 0 else DISABLED)
+            each_btn.config(state=NORMAL if count > 0 else DISABLED)
+        else:
+            dl_btn.config(text=f'Download Selected ({count})')
+            dl_btn.config(state=NORMAL if count > 0 else DISABLED)
+
+    for i, entry in enumerate(entries):
+        var = BooleanVar(value=True)
+        check_vars.append(var)
+        title = entry.get('title', f'Video {i + 1}')
+        duration = entry.get('duration')
+        if duration:
+            mins, secs = divmod(int(duration), 60)
+            hours, mins = divmod(mins, 60)
+            dur_str = f' [{hours}:{mins:02d}:{secs:02d}]' if hours else f' [{mins}:{secs:02d}]'
+        else:
+            dur_str = ''
+        cb = Checkbutton(list_frame, text=f'{i + 1}. {title}{dur_str}', variable=var,
+                         command=update_button_text)
+        cb.pack(side=TOP, anchor=W, padx=5, pady=1)
+
+    # Bind mousewheel scrolling to all children so scrolling works when
+    # hovering over checkboxes (not just the bare frame background).
+    def _bind_mousewheel_tree(widget):
+        widget.bind("<MouseWheel>", lambda e: scrollable.canv.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        for child in widget.winfo_children():
+            _bind_mousewheel_tree(child)
+
+    _bind_mousewheel_tree(list_frame)
+
+    # Auto-size width to fit content, capped at 50% screen width for initial size.
+    # User can still manually resize wider than the cap.
+    popup.update_idletasks()
+    max_width = popup.winfo_screenwidth() // 2
+    needed_width = popup.winfo_reqwidth() + 40  # padding for scrollbar + borders
+    initial_width = min(needed_width, max_width)
+    popup.geometry(f'{initial_width}x500')
+
+
+def _queue_selected_entries(entries: list, playlist_url: str, path: str, mode: str):
+    """Queue download tasks for selected playlist entries."""
+    if mode == 'video_best':
+        for entry in entries:
+            video_url = get_entry_url(entry, playlist_url)
+            ydl_opts = ydl_base_opts.copy()
+            ydl_opts['noplaylist'] = True
+            ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
+            download_queue.append(DownloadTask(video_url, path, ydl_opts, queue_frame))
+    elif mode == 'audio_best':
+        for entry in entries:
+            video_url = get_entry_url(entry, playlist_url)
+            ydl_opts = ydl_base_opts.copy()
+            ydl_opts['noplaylist'] = True
+            ydl_opts.update({'format': 'bestaudio'})
+            ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
+            ydl_opts['outtmpl'] = ydl_opts['outtmpl'].replace('.%(ext)s', '_audio.%(ext)s')
+            download_queue.append(DownloadTask(video_url, path, ydl_opts, queue_frame))
+    elif mode == 'customize_same':
+        # Show format picker for first video, then apply to all
+        urls = [get_entry_url(e, playlist_url) for e in entries]
+        first_url = urls[0]
+        handle_download_info(first_url, path, apply_to_urls=urls[1:] if len(urls) > 1 else None)
+    elif mode == 'customize_each':
+        # Chain through format picker for each video sequentially
+        urls = [get_entry_url(e, playlist_url) for e in entries]
+        _chain_customize(urls, path, 0)
+
+
+def _chain_customize(urls: list, path: str, index: int):
+    """Show format picker for each URL sequentially."""
+    if index >= len(urls):
+        return
+    handle_download_info(urls[index], path,
+                         on_complete=lambda: _chain_customize(urls, path, index + 1))
+
+
+def detect_and_handle(url: str, path: str, mode: str):
+    """Gateway function that detects playlists and routes accordingly."""
     if not url:
         messagebox.showerror('Error', 'URL is empty!')
         return
     if not is_valid_url(url):
         messagebox.showerror('Error', 'URL is invalid!')
         return
+
+    # Disable buttons during detection
+    download_video_button.config(state=DISABLED)
+    download_audio_button.config(state=DISABLED)
+    download_info_button.config(state=DISABLED)
+
+    # Show checking popup
+    checking_popup = Toplevel(takefocus=True)
+    checking_popup.title('Checking...')
+    Label(checking_popup, text='Checking URL...').pack(padx=20, pady=20)
+    checking_popup.update()
+
+    def _re_enable():
+        download_video_button.config(state=NORMAL)
+        download_audio_button.config(state=NORMAL)
+        download_info_button.config(state=NORMAL)
+
+    def on_popup_close():
+        checking_popup.destroy()
+        _re_enable()
+
+    checking_popup.protocol("WM_DELETE_WINDOW", on_popup_close)
+
+    def _detect_thread():
+        info = extract_flat_info(url)
+
+        def _handle_result():
+            if not checking_popup.winfo_exists():
+                _re_enable()
+                return
+            checking_popup.destroy()
+
+            if not info:
+                _re_enable()
+                messagebox.showerror('Error', 'URL is invalid or extraction failed!')
+                return
+
+            is_playlist = info.get('_type') == 'playlist' or 'entries' in info
+            if is_playlist and info.get('entries'):
+                _re_enable()
+                show_playlist_selector(info, url, path, mode)
+            else:
+                # Single video - delegate to original handler
+                _re_enable()
+                _handle_single(url, path, mode)
+
+        root.after(0, _handle_result)
+
+    threading.Thread(target=_detect_thread, daemon=True).start()
+
+
+def _handle_single(url: str, path: str, mode: str):
+    """Delegate to the original per-mode handler for a single video."""
+    if mode == 'video_best':
+        handle_download_video_best(url, path)
+    elif mode == 'audio_best':
+        handle_download_audio_best(url, path)
+    elif mode == 'customize':
+        handle_download_info(url, path)
+
+
+def handle_download_video_best(url: str, path: str):
     ydl_opts = ydl_base_opts.copy()
+    ydl_opts['noplaylist'] = True
     ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
     download_queue.append(DownloadTask(url, path, ydl_opts, queue_frame))
 
 
 def handle_download_audio_best(url: str, path: str):
-    if not url:
-        messagebox.showerror('Error', 'URL is empty!')
-        return
-    if not is_valid_url(url):
-        messagebox.showerror('Error', 'URL is invalid!')
-        return
     ydl_opts = ydl_base_opts.copy()
+    ydl_opts['noplaylist'] = True
     ydl_opts.update({'format': 'bestaudio'})
     ydl_opts['outtmpl'] = os.path.join(path, ydl_opts['outtmpl'] if isinstance(ydl_opts['outtmpl'], str) else ydl_opts['outtmpl']['default'])
     ydl_opts['outtmpl'] = ydl_opts['outtmpl'].replace('.%(ext)s', '_audio.%(ext)s')
     download_queue.append(DownloadTask(url, path, ydl_opts, queue_frame))
 
 
-def handle_download_info(url: str, path: str, ydl_opts: dict = None):
+def handle_download_info(url: str, path: str, ydl_opts: dict = None,
+                         on_complete: Callable = None, apply_to_urls: list = None):
     if not url:
         messagebox.showerror('Error', 'URL is empty!')
+        if on_complete: on_complete()
         return
     if not is_valid_url(url):
         messagebox.showerror('Error', 'URL is invalid!')
+        if on_complete: on_complete()
         return
     if not ydl_opts: ydl_opts = ydl_base_opts.copy()
+    ydl_opts['noplaylist'] = True
 
     # Disable button to prevent spamming
     download_info_button.config(state=DISABLED)
@@ -472,6 +731,7 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
     def on_loading_close():
         loading_popup.destroy()
         download_info_button.config(state=NORMAL)
+        if on_complete: on_complete()
 
     loading_popup.protocol("WM_DELETE_WINDOW", on_loading_close)
 
@@ -490,6 +750,7 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
             root.after(0, lambda: messagebox.showerror('Error', 'URL is invalid or extraction failed!'))
             # Re-enable button
             root.after(0, lambda: download_info_button.config(state=NORMAL))
+            if on_complete: root.after(0, on_complete)
             return
 
         # Schedule UI update on main thread
@@ -503,6 +764,7 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
         def on_details_close():
             details_window.destroy()
             download_info_button.config(state=NORMAL)
+            if on_complete: on_complete()
 
         details_window.protocol("WM_DELETE_WINDOW", on_details_close)
 
@@ -568,10 +830,24 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None):
                         if f['audio']: task_info['formats']['audio'] = f['audio']
 
             download_queue.append(DownloadTask(url, path, ydl_opts, queue_frame, task_info))
+
+            # If apply_to_urls is set, queue the same format for all other URLs
+            if apply_to_urls:
+                for extra_url in apply_to_urls:
+                    extra_opts = ydl_opts.copy()
+                    extra_opts['noplaylist'] = True
+                    # Reset outtmpl with TITLE placeholder for each new video
+                    base_tmpl = ydl_base_opts['outtmpl'] if isinstance(ydl_base_opts['outtmpl'], str) else ydl_base_opts['outtmpl']['default']
+                    extra_opts['outtmpl'] = os.path.join(path, base_tmpl)
+                    extra_opts['progress_hooks'] = []
+                    extra_opts['postprocessor_hooks'] = []
+                    download_queue.append(DownloadTask(extra_url, path, extra_opts, queue_frame))
+
             ydl_opts = ydl_base_opts.copy()  # reset for next task
             details_window.destroy()
             root.lift()
             download_info_button.config(state=NORMAL)
+            if on_complete: on_complete()
 
         download_button = Button(scrollableFrame.scrollwindow, text='Download', command=handle_download)  # have to define first else callbacks below complain
         selected_format = StringVar()
@@ -675,11 +951,11 @@ path_select_button.pack(side=LEFT, padx=(2, 10))
 
 buttons_frame = Frame(root)
 buttons_frame.pack(expand=True, fill=BOTH, side=TOP, anchor=NW)
-download_video_button = Button(buttons_frame, text='Download Video', command=lambda: handle_download_video_best(url_input.get(), path_input.get()))
+download_video_button = Button(buttons_frame, text='Download Video', command=lambda: detect_and_handle(url_input.get(), path_input.get(), 'video_best'))
 download_video_button.pack(expand=True, fill=X, side=LEFT, padx=(10, 0))
-download_audio_button = Button(buttons_frame, text='Download Audio', command=lambda: handle_download_audio_best(url_input.get(), path_input.get()))
+download_audio_button = Button(buttons_frame, text='Download Audio', command=lambda: detect_and_handle(url_input.get(), path_input.get(), 'audio_best'))
 download_audio_button.pack(expand=True, fill=X, side=LEFT, padx=(2, 0))
-download_info_button = Button(buttons_frame, text='Customize Downloads', command=lambda: handle_download_info(url_input.get(), path_input.get()))
+download_info_button = Button(buttons_frame, text='Customize Downloads', command=lambda: detect_and_handle(url_input.get(), path_input.get(), 'customize'))
 download_info_button.pack(expand=True, fill=X, side=LEFT, padx=(2, 10))
 
 scroll_container_frame = Frame(root)
