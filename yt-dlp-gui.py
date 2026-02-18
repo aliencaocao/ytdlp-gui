@@ -46,7 +46,7 @@ try:
 except FileNotFoundError:
     logger.warning('Deno not found! yt-dlp might fail on some sites.')
 
-ydl_base_opts: dict[str, Any] = {'outtmpl': 'TITLE-%(id)s.%(ext)s',
+ydl_base_opts: dict[str, Any] = {'outtmpl': '%(title)s.%(ext)s',
                                  'restrictfilenames': True,
                                  'nocheckcertificate': True,
                                  'ignoreerrors': False,
@@ -271,11 +271,6 @@ class DownloadTask(Frame):
         self.duration = parsed_info['duration']
         self.size = parsed_info['size']
         self.formats = parsed_info['formats']
-
-        if isinstance(self.ydl_opts['outtmpl'], dict):
-            self.ydl_opts['outtmpl']['default'] = self.ydl_opts['outtmpl']['default'].replace('TITLE', self.title)
-        else:
-            self.ydl_opts['outtmpl'] = self.ydl_opts['outtmpl'].replace('TITLE', self.title)
 
         self.after(0, self._update_ui_after_extraction)
 
@@ -610,6 +605,9 @@ def detect_and_handle(url: str, path: str, mode: str):
     if not is_valid_url(url):
         messagebox.showerror('Error', 'URL is invalid!')
         return
+    if not path.strip():
+        messagebox.showerror('Error', 'Download directory is empty! Please choose a folder.')
+        return
 
     # Disable buttons during detection
     download_video_button.config(state=DISABLED)
@@ -817,7 +815,7 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None,
                 for extra_url in apply_to_urls:
                     extra_opts = ydl_opts.copy()
                     extra_opts['noplaylist'] = True
-                    # Reset outtmpl with TITLE placeholder for each new video
+                    # Reset outtmpl for each new video
                     base_tmpl = ydl_base_opts['outtmpl'] if isinstance(ydl_base_opts['outtmpl'], str) else ydl_base_opts['outtmpl']['default']
                     extra_opts['outtmpl'] = os.path.join(path, base_tmpl)
                     extra_opts['progress_hooks'] = []
@@ -832,7 +830,7 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None,
 
         download_button = Button(scrollableFrame.scrollwindow, text='Download', command=handle_download)  # have to define first else callbacks below complain
         selected_format = StringVar()
-        selected_format.trace('w', on_select_format)
+        selected_format.trace_add('write', on_select_format)
         video_only_formats, audio_only_formats = {'Select video format': None}, {'Select audio format': None}  # {text: value} except for None
         radiobutton_frame = Frame(formats_frame, relief='groove', borderwidth=3)
         radiobutton_frame.pack(side=TOP, fill=X, expand=True)
@@ -850,9 +848,9 @@ def handle_download_info(url: str, path: str, ydl_opts: dict = None,
         custom_formats_frame = LabelFrame(formats_frame, text='Customize', borderwidth=3)
         custom_formats_frame.pack(side=TOP, fill=X, expand=True)
         video_selected_format = StringVar(value='Select video format')
-        video_selected_format.trace('w', on_select_single_format)
+        video_selected_format.trace_add('write', on_select_single_format)
         audio_selected_format = StringVar(value='Select audio format')
-        audio_selected_format.trace('w', on_select_single_format)
+        audio_selected_format.trace_add('write', on_select_single_format)
         OptionMenu(custom_formats_frame, video_selected_format, 'Select video format', *video_only_formats.keys()).pack(side=TOP, fill=X, expand=True, pady=(0, 10))
         OptionMenu(custom_formats_frame, audio_selected_format, 'Select audio format', *audio_only_formats.keys()).pack(side=TOP, fill=X, expand=True, pady=(0, 10))
         audio_convert_format = StringVar(value='Do not convert')
@@ -903,7 +901,7 @@ def do_tasks():
     queue_frame.after(500, do_tasks)
 
 
-initial_dir = os.getcwd()
+initial_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
 if sys.platform == 'win32':
     try:
         initial_dir = winreg.QueryValue(winreg.HKEY_CURRENT_USER, 'Software\\YT-DLP GUI')
